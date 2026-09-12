@@ -10,8 +10,6 @@ This fork is for people who want pstack's engineering playbooks without making C
 
 The upstream ports already make pstack usable outside Cursor. [pstack-claude](https://github.com/michael-denyer/pstack-claude) translates Cursor primitives to Claude Code and Codex. This fork keeps that skill tree and adds Herdr as the orchestration transport.
 
-The split is intentional:
-
 - **pstack decides what work to do.** Playbooks, principles, decomposition, model roles, review, synthesis, and verification stay pstack concerns.
 - **Herdr decides how delegated agents run.** Panes, processes, CLI startup, account profiles, lifecycle state, waiting, blocked workers, and terminal output stay Herdr concerns.
 - **Claude Code and Codex remain the workers.** A Herdr agent is still a real `claude` or `codex` CLI process with its own context window.
@@ -41,7 +39,7 @@ poteto-mode
        └── Codex verifier
 ```
 
-The coordinator stays alive and owns the human-facing result. Workers may recursively delegate when the active pstack workflow requires it. The default Herdr nesting limit is three levels, matching pstack's coordinator, subcoordinator, worker style rather than flattening every workflow into one fan-out.
+The coordinator stays alive and owns the human-facing result. Workers may recursively delegate when the active pstack workflow requires it. The default Herdr nesting limit is three levels.
 
 ## What Herdr adds
 
@@ -49,7 +47,7 @@ The coordinator stays alive and owns the human-facing result. Workers may recurs
 - Claude and Codex workers in the same pstack run.
 - One subscription shared by many workers, or multiple independently authenticated subscriptions.
 - Separate context windows for each worker process.
-- Role-based routing such as `explorer`, `implementation`, `reviewer`, `arena-candidate`, `arena-judge`, and `verifier`.
+- Role-based routing for explorers, implementers, reviewers, arena candidates, judges, and verifiers.
 - Recursive delegation through Herdr instead of native-only subagents.
 - Worktree isolation for concurrent writers and arena candidates.
 - Explicit handling of `idle`, `done`, `blocked`, and `unknown` agent states.
@@ -57,8 +55,6 @@ The coordinator stays alive and owns the human-facing result. Workers may recurs
 ## Requirements
 
 Install [Herdr](https://herdr.dev), Claude Code and/or Codex CLI, Git, and the official Herdr Agent Skill.
-
-For example:
 
 ```shell
 npx skills add herdrdev/herdr --skill herdr -g
@@ -70,14 +66,12 @@ The Herdr runtime activates only inside a Herdr-managed environment where `HERDR
 
 ### Claude Code
 
-This fork retains the Claude Code plugin layout from pstack-claude:
-
 ```text
 /plugin marketplace add TiewKH/pstack-herdr
 /plugin install pstack@pstack-claude
 ```
 
-Launch Claude Code from a Herdr pane. The SessionStart mandate detects `HERDR_ENV=1`, loads `pstack:herdr-runtime`, and then routes non-trivial engineering work through `pstack:poteto-mode`.
+Launch Claude Code from a Herdr pane. The SessionStart mandate detects `HERDR_ENV=1`, loads `pstack:herdr-runtime`, and routes non-trivial engineering work through `pstack:poteto-mode`.
 
 ### Shared Agent Skills
 
@@ -97,8 +91,6 @@ npx skills add https://github.com/TiewKH/pstack-herdr/tree/main/plugins/pstack/s
 ### Codex
 
 Codex uses the same `skills/` tree. Inside Herdr, pstack delegation is routed through `pstack:herdr-runtime`, so workers can be Claude, Codex, or a mixture selected by routing configuration.
-
-For Codex slash-command shortcuts:
 
 ```shell
 mkdir -p ~/.codex/prompts
@@ -146,7 +138,6 @@ Multiple subscriptions are optional. Use separate CLI config homes such as `~/.c
 
 ```yaml
 version: 1
-
 orchestration:
   max_depth: 3
   default_timeout_ms: 180000
@@ -157,13 +148,11 @@ profiles:
     model: inherit
     env:
       CLAUDE_CONFIG_DIR: ~/.claude-main
-
   claude-a:
     kind: claude
     model: inherit
     env:
       CLAUDE_CONFIG_DIR: ~/.claude-a
-
   codex-a:
     kind: codex
     model: inherit
@@ -310,8 +299,6 @@ Outside `HERDR_ENV=1`, existing Claude Code and Codex adaptations remain the bas
 | `/what-did-i-get-done` | summarize authored commits over a user-chosen period |
 
 ## Attribution and lineage
-
-This repository stands on three projects.
 
 **pstack.** The original pstack engineering workflows and Poteto Mode were created by [Lauren Tan (poteto)](https://x.com/poteto) and published in [cursor/plugins](https://github.com/cursor/plugins/tree/main/pstack) under the MIT License.
 
