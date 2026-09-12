@@ -23,12 +23,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The scanner is isolated from the host network and sees the checkout
-      # read-only. A fixed version is used; Dependabot/security review owns
-      # deliberate upgrades.
+      # The scanner needs outbound access for advisory data, but the repository
+      # is mounted read-only and the workflow token has contents:read only.
       - name: Scan lockfiles
         run: |
-          docker run --rm --network none -v "$PWD:/src:ro" \
+          docker run --rm -v "$PWD:/src:ro" \
             ghcr.io/google/osv-scanner:v2.5.1 \
             scan source --recursive --include-git-root /src \
             | tee osv-output.txt
