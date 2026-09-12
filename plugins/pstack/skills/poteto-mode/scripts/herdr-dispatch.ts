@@ -57,14 +57,27 @@ async function run(args: string[]): Promise<CommandResult> {
   const [stdout, stderr, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
   return { stdout, stderr, exitCode };
 }
-async function runHerdr(args: string[]): Promise<unknown> {
+async function runHerdrCommand(args: string[]): Promise<CommandResult> {
   const result = await run(["herdr", ...args]);
   if (result.exitCode !== 0) {
     const detail = result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`;
     throw new Error(`herdr ${args.join(" ")} failed: ${detail}`);
   }
+  return result;
+}
+async function runHerdrJson(args: string[]): Promise<unknown> {
+  const result = await runHerdrCommand(args);
   const text = result.stdout.trim();
-  return text ? JSON.parse(text) : {};
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`herdr ${args.join(" ")} returned non-JSON output where JSON was expected: ${text}`, { cause: error });
+  }
+}
+async function runHerdrText(args: string[]): Promise<string> {
+  const result = await runHerdrCommand(args);
+  return result.stdout.replace(/\s+$/, "");
 }
 function paneId(payload: unknown): string {
   const id = (payload as { result?: { pane?: { pane_id?: string } } }).result?.pane?.pane_id;
@@ -122,18 +135,18 @@ export async function dispatch(options: DispatchOptions): Promise<unknown> {
   const splitArgs = ["pane", "split", "--current", "--direction", options.direction, "--cwd", resolve(options.cwd), "--no-focus"];
   const env = { ...(chosen.profile.env ?? {}), PSTACK_HERDR_DEPTH: String(nesting.next), PSTACK_HERDR_PARENT_KIND: chosen.profile.kind };
   for (const [key, value] of Object.entries(env)) splitArgs.push("--env", `${key}=${expandHome(value)}`);
-  const pane = paneId(await runHerdr(splitArgs));
+  const pane = paneId(await runHerdrJson(splitArgs));
   const startArgs = ["agent", "start", options.name, "--kind", chosen.profile.kind, "--pane", pane];
   const model = options.model ?? chosen.profile.model;
   if (model && model !== "inherit" && model !== "auto") startArgs.push("--", "--model", model);
-  await runHerdr(startArgs);
+  await runHerdrJson(startArgs);
   const promptArgs = ["agent", "prompt", options.name, prompt];
   if (options.wait) promptArgs.push("--wait", "--timeout", String(timeout));
-  const promptResult = await runHerdr(promptArgs);
+  const promptResult = await runHerdrJson(promptArgs);
   if (!options.wait) return { agent: options.name, pane, profile: chosen.name, kind: chosen.profile.kind, depth: nesting.next };
-  const state = await runHerdr(["agent", "get", options.name]);
+  const state = await runHerdrJson(["agent", "get", options.name]);
   const status = agentStatus(state);
-  const output = await runHerdr(["agent", "read", options.name, "--source", "recent-unwrapped", "--lines", "240"]);
+  const output = await runHerdrText(["agent", "read", options.name, "--source", "recent-unwrapped", "--lines", "240"]);
   return { agent: options.name, pane, profile: chosen.name, kind: chosen.profile.kind, depth: nesting.next, status, blocked: status === "blocked", prompt: promptResult, output };
 }
 async function main(): Promise<void> {
