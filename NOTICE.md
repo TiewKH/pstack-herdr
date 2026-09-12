@@ -1,6 +1,27 @@
 # NOTICE
 
-This plugin is a port of upstream MIT-licensed work. All upstream copyright notices and license terms are preserved.
+This repository is a fork of `michael-denyer/pstack-claude`, which ports upstream MIT-licensed pstack work to Claude Code and Codex. All upstream copyright notices and license terms are preserved.
+
+## Project lineage
+
+- **pstack** — original engineering workflows and Poteto Mode by Lauren Tan (poteto), published in `cursor/plugins/pstack`, MIT License.
+- **pstack-claude** — Claude Code/Codex portability work authored and maintained by Michael Denyer. `pstack-herdr` is forked from this project.
+- **cursor-team-kit components** — selected imported skills copyright (c) 2026 Cursor, MIT License.
+- **Herdr** — external terminal/agent runtime and official Agent Skill maintained by herdrdev, Apache License 2.0.
+
+`pstack-herdr` is an independent fork. It is not an official project of Lauren Tan, Michael Denyer, Cursor, Anthropic, OpenAI, or herdrdev.
+
+## Herdr attribution
+
+The Herdr execution support in this fork integrates with the external Herdr project and its official Agent Skill:
+
+- Project: Herdr
+- Maintainer/organization: herdrdev
+- Upstream: https://github.com/herdrdev/herdr
+- Official skill used as the runtime authority: `skills/herdr/SKILL.md`
+- License: Apache License 2.0
+
+Herdr is not vendored into this repository. Users install Herdr and its official skill separately. This fork adds pstack-specific instructions that call the installed Herdr runtime. Existing pstack, pstack-claude, and cursor-team-kit material remains governed by the repository's preserved license and notice files.
 
 ## Upstream sources
 
@@ -19,36 +40,45 @@ This plugin is a port of upstream MIT-licensed work. All upstream copyright noti
 | `plugins/pstack/skills/poteto-mode/playbooks/multi-phase-plan.md`, `plugins/pstack/skills/poteto-mode/scripts/check-plan.mjs` (v0.14.8 additions) | [cursor/plugins/pstack @ 7314f72](https://github.com/cursor/plugins/tree/7314f72/pstack) | (c) 2026 Lauren Tan | MIT | [LICENSE](LICENSE) |
 | `plugins/pstack/skills/principle-attack-the-premise/`, `plugins/pstack/skills/principle-test-behavior-not-implementation/` (post-v0.14.8 additions) | [cursor/plugins/pstack @ e8d856f](https://github.com/cursor/plugins/tree/e8d856f/pstack) | (c) 2026 Lauren Tan | MIT | [LICENSE](LICENSE) |
 
-## What changed in the port
+## What changed in the pstack-claude port
 
-The port is editorial, not mechanical. See [CHANGES.md](CHANGES.md) for the full per-skill audit of substitutions applied.
+The pstack-claude port is editorial, not mechanical. See [CHANGES.md](CHANGES.md) for the full per-skill audit of substitutions applied by that port.
 
-Summary of structural changes:
+Summary of structural changes inherited by this fork:
 
 - Plugin content lives at `plugins/pstack/` (with its own `.claude-plugin/plugin.json`). The repo root holds `.claude-plugin/marketplace.json` and the LICENSE / NOTICE / README / CHANGES docs.
-- `.claude-plugin/marketplace.json` added at repo root so the repo is installable via `/plugin marketplace add`. The marketplace's single plugin entry sources from `./plugins/pstack`.
-- `plugins/pstack/.codex-plugin/prompts/<name>.md` stubs added so each public skill is reachable as a slash command on Codex. Claude Code needs no stubs: the skill itself serves `/pstack:<name>`.
-- Seven skills imported from `cursor-team-kit`: `deslop`, `thermo-nuclear-code-quality-review`, `make-pr-easy-to-review`, `fix-ci`, `fix-merge-conflicts`, `get-pr-comments`, `what-did-i-get-done`. All copied verbatim — no rewiring needed.
-- `plugins/pstack/skills/babysit/` is independently authored as the Claude Code analog of Cursor's `/babysit` built-in. It has no upstream pstack equivalent; its workflow is informed by Cursor's public `/babysit` behavior. No code or prose was copied from any source.
-- `plugins/pstack/skills/poteto-mode/scripts/` is vendored from upstream (`watch-pr`, `orch`, `bootstrap.ts`, `worktree-audit.sh`, `package.json`, `bun.lock`). Port edits, each on the forked list `bun tools/sync.mjs --dry-run` prints: `worktree-audit.sh` reads `~/.claude/projects/` instead of Cursor's transcript directory, warns when `jq` or `rg` is missing, reports prunable worktrees, and runs on GNU as well as BSD coreutils; `bootstrap.ts` fails clearly under node and installs production dependencies only; `orch/store.ts` and `orch/orch.test.ts` carry the silent-failure fixes from #35; `package.json` typechecks the whole tree; `tsconfig.json` is port-only. Everything else is upstream's code under the upstream MIT license.
-- `plugins/pstack/agents/comment-sicko.md` is upstream's `Comment Sicko` agent, renamed to `comment-sicko` so the name works as a Claude Code `subagent_type`. The body is verbatim.
-- A Codex build shares the same `skills/` tree. It adds `plugins/pstack/.codex-plugin/plugin.json`, a root `.agents/plugins/marketplace.json`, and `plugins/pstack/skills/poteto-mode/references/codex-tools.md` (the Claude-to-Codex tool, model, built-in, and per-skill map). Affected skill entry points link to this map so direct invocation works without the optional Codex prompt stubs. See [CHANGES.md](CHANGES.md#codex-port).
+- `.claude-plugin/marketplace.json` makes the repo installable via `/plugin marketplace add`.
+- `plugins/pstack/.codex-plugin/prompts/<name>.md` stubs make public skills reachable as slash commands on Codex.
+- Seven skills are imported from `cursor-team-kit`: `deslop`, `thermo-nuclear-code-quality-review`, `make-pr-easy-to-review`, `fix-ci`, `fix-merge-conflicts`, `get-pr-comments`, `what-did-i-get-done`.
+- `plugins/pstack/skills/babysit/` is independently authored as the Claude Code analog of Cursor's `/babysit` built-in.
+- `plugins/pstack/skills/poteto-mode/scripts/` is vendored from upstream with the pstack-claude port edits documented in CHANGES.md.
+- `plugins/pstack/agents/comment-sicko.md` is upstream's `Comment Sicko` agent, renamed to `comment-sicko` for Claude Code compatibility.
+- The Codex build shares the same `skills/` tree and uses `plugins/pstack/skills/poteto-mode/references/codex-tools.md` for Claude-to-Codex mappings.
 
-## Modifications
+## pstack-herdr modifications
 
-Per the MIT license, modifications are permitted. Skill bodies have been edited to substitute Cursor-specific primitives with their Claude Code equivalents (the full substitution table is in [CHANGES.md](CHANGES.md)). All upstream copyright notices in source files (where present) are preserved.
+This fork adds Herdr as an execution transport while preserving the pstack playbook and principle tree. Herdr-specific authored files include:
 
-Port-authored files covered by this notice include:
+- `plugins/pstack/skills/herdr-runtime/SKILL.md`
+- `plugins/pstack/skills/herdr-runtime/references/routes.example.yaml`
+- `config/routes.example.yaml`
+- `tests/herdr-runtime.test.mjs`
+- Herdr activation additions to `plugins/pstack/hooks/session-start-context.md`
+- Herdr runtime documentation and attribution in `README.md` and this file
+
+Per the MIT license, modifications to pstack-derived material are permitted. Existing upstream copyright notices in source files, where present, are preserved.
+
+## Port-authored files inherited from pstack-claude
 
 - `plugins/pstack/.claude-plugin/plugin.json`
-- `.claude-plugin/marketplace.json` (repo root)
+- `.claude-plugin/marketplace.json`
 - `plugins/pstack/.codex-plugin/plugin.json`
-- `.agents/plugins/marketplace.json` (repo root)
+- `.agents/plugins/marketplace.json`
 - `plugins/pstack/skills/poteto-mode/references/codex-tools.md`
 - `plugins/pstack/.codex-plugin/prompts/*.md`
-- `plugins/pstack/skills/babysit/SKILL.md` (independently authored; workflow informed by Cursor's public `/babysit` behavior)
-- `plugins/pstack/hooks/hooks.json` and `plugins/pstack/hooks/session-start-context.md` (the auto-fire hook and its mandate)
-- `NOTICE.md` (this file)
+- `plugins/pstack/skills/babysit/SKILL.md`
+- `plugins/pstack/hooks/hooks.json` and the original session-start mandate
+- `NOTICE.md`
 - `NOTICE-skills.md`
 - `README.md`
 - `CHANGES.md`
