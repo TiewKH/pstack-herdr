@@ -5,7 +5,7 @@ description: "Spawn N parallel candidates at the same task, pick a base, graft t
 
 # Arena
 
-On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill.
+On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill. When `HERDR_ENV=1`, read [the Herdr execution mapping](../poteto-mode/references/herdr-tools.md) and use `scripts/herdr-dispatch.ts` for candidates and judges instead of native Agent/Task/spawn_agent delegation.
 
 Fan out N parallel attempts at the same task. Read every candidate end to end. Pick the strongest as the base. Graft the best ideas from the others into it. Verify the synthesized result.
 
@@ -31,15 +31,19 @@ The N candidates will receive the same prompt, so the prompt is the contract.
 
 ## Phase B: Fan out
 
-Spawn all N subagents in one message with `run_in_background: true`, each with the task, the path to the shared grounding, its own output path, and instructions to produce both the artifact and a short rationale.
+Each candidate receives the task, the path to shared grounding, its own output path, and instructions to produce both the artifact and a short rationale. Each rationale names alternatives considered and rejected.
 
-Each rationale names the alternatives the candidate considered and what it rejected.
+Under Herdr, write the candidate brief to a temporary file and launch all N dispatcher processes concurrently with `--role arena-candidate --name <unique-name> --prompt-file <brief> --cwd <candidate-worktree> --wait`. Use `--model` for an explicitly selected arena arm when needed. Start all dispatchers before waiting for results.
+
+Outside Herdr, spawn all N subagents in one message with `run_in_background: true`.
 
 If a candidate fails to produce output, proceed with N-1 and note the dropout in the synthesis record.
 
 ## Phase C: Cross-judge
 
-After all Phase B candidates complete, choose one model from the `arena cross-judge pool` in `~/.claude/pstack-models.md` when present. Otherwise choose from the runner defaults in [Models](#models). Prefer a different model family from the parent's. Spawn one readonly judge subagent on that model. It sees the rubric and the candidates by path label, scores each criterion, and recommends a base with rationale. It runs in parallel with the parent's reading in Phase D, not with the candidates themselves. Don't spawn the judge while candidates are still writing.
+After all Phase B candidates complete, choose one model from the `arena cross-judge pool` in `~/.claude/pstack-models.md` when present. Otherwise choose from the runner defaults in [Models](#models). Prefer a different model family from the parent's.
+
+Under Herdr, write the rubric and candidate paths to a judge brief and dispatch it with `--role arena-judge --readonly --wait`. Outside Herdr, spawn one readonly judge subagent on the selected model. The judge scores each criterion and recommends a base with rationale. It runs in parallel with the parent's reading in Phase D, not with candidates that are still writing.
 
 ## Phase D: Pick a base
 
@@ -59,17 +63,17 @@ Fold each graft in by hand, per the **redesign-from-first-principles** principle
 
 Record what was grafted, from which candidate, and what was rejected and why.
 
-When N candidates converge on the same shape, that is a strong agreement signal. Note the convergence in the record and ship the consensus shape. No graft is needed. When N candidates wildly diverge, Phase A was under-specified. Reframe and re-run rather than averaging the divergence.
+When N candidates converge on the same shape, note the convergence and ship the consensus shape. When N candidates wildly diverge, Phase A was under-specified. Reframe and re-run rather than averaging the divergence.
 
 ## Phase F: Verify
 
 The synthesized artifact has to hold up under the same scrutiny as any other output, per the **prove-it-works** principle skill.
 
-If verification surfaces a problem the arena did not catch, either Phase A was wrong (re-frame and re-run) or one candidate caught it and you missed the graft (go back to Phase E). Don't paper over.
+If verification surfaces a problem the arena did not catch, either Phase A was wrong or one candidate caught it and you missed the graft. Don't paper over.
 
 ## Outputs
 
-One synthesized artifact. One short synthesis note alongside, naming the base, the grafts (with source candidate), the rejections, the dropouts if any, and the verification result.
+One synthesized artifact. One short synthesis note alongside, naming the base, grafts, rejections, dropouts if any, and verification result.
 
 ## Models
 
