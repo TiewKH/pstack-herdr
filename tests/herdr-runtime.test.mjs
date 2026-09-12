@@ -7,33 +7,40 @@ import { fileURLToPath } from "node:url";
 const root = join(fileURLToPath(new URL("..", import.meta.url)));
 const read = (path) => readFileSync(join(root, path), "utf8");
 
-const runtime = read("plugins/pstack/skills/herdr-runtime/SKILL.md");
+const dispatcher = read("plugins/pstack/skills/poteto-mode/scripts/herdr-dispatch.ts");
+const mapping = read("plugins/pstack/skills/poteto-mode/references/herdr-tools.md");
 const hook = read("plugins/pstack/hooks/session-start-context.md");
-const routes = read("plugins/pstack/skills/herdr-runtime/references/routes.example.yaml");
+const routes = read("config/routes.example.yaml");
 
-const requiredRuntimeTerms = [
-  "HERDR_ENV=1",
+for (const term of [
+  "HERDR_ENV",
   "PSTACK_HERDR_DEPTH",
   "CLAUDE_CONFIG_DIR",
   "CODEX_HOME",
-  "herdr agent start",
-  "herdr agent prompt",
-  "herdr agent wait",
-  "herdr agent read",
-  "Separate Before Serializing Shared State",
-];
-
-for (const term of requiredRuntimeTerms) {
-  if (!runtime.includes(term)) throw new Error(`herdr-runtime is missing required contract: ${term}`);
+  '"pane", "split"',
+  '"agent", "start"',
+  '"agent", "prompt"',
+  '"agent", "get"',
+  '"agent", "read"',
+]) {
+  if (!dispatcher.includes(term)) throw new Error(`native Herdr dispatcher is missing: ${term}`);
 }
 
-if (!hook.includes("pstack:herdr-runtime")) {
-  throw new Error("session-start mandate does not activate pstack:herdr-runtime");
+if (hook.includes("pstack:herdr-runtime") || hook.includes("HERDR_ENV=1")) {
+  throw new Error("session-start hook must not be responsible for Herdr delegation");
 }
 
-if (!hook.includes("HERDR_ENV=1")) {
-  throw new Error("session-start mandate does not gate Herdr activation on HERDR_ENV=1");
+if (!mapping.includes("herdr-dispatch.ts")) {
+  throw new Error("Herdr platform mapping does not point to the native dispatcher");
 }
+
+for (const skill of ["how", "arena", "interrogate", "swarm"]) {
+  const body = read(`plugins/pstack/skills/${skill}/SKILL.md`);
+  if (!body.includes("herdr-dispatch")) throw new Error(`${skill} does not structurally route Herdr delegation`);
+}
+
+const feature = read("plugins/pstack/skills/poteto-mode/playbooks/feature.md");
+if (!feature.includes("herdr-dispatch")) throw new Error("feature playbook does not structurally route Herdr delegation");
 
 for (const role of [
   "explorer",
@@ -47,4 +54,4 @@ for (const role of [
   if (!routes.includes(`${role}:`)) throw new Error(`route example is missing role: ${role}`);
 }
 
-console.log("Herdr runtime contract checks passed");
+console.log("Native Herdr dispatch contract checks passed");
