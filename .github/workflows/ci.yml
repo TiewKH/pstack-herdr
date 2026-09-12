@@ -33,6 +33,8 @@ jobs:
           git diff --exit-code
       - name: Tool and invariant fixture tests
         run: bun test tests/
+      - name: Herdr runtime contract
+        run: node tests/herdr-runtime.test.mjs
 
   skills-only:
     name: Skills-only install
