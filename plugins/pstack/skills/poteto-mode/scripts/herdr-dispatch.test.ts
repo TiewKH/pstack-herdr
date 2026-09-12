@@ -25,6 +25,7 @@ describe("herdr-dispatch routing", () => {
 
   test("spread roles deterministically select from their pool", () => {
     const selected = selectProfileName(config, "explorer", "explorer-a");
+    if (!selected) throw new Error("expected configured explorer profile");
     expect(["claude-a", "codex-a"]).toContain(selected);
   });
 
