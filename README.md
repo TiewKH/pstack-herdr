@@ -8,11 +8,11 @@ This fork is for people who want pstack's engineering playbooks without making C
 
 ## Why this fork
 
-The upstream ports already make pstack usable outside Cursor. [pstack-claude](https://github.com/michael-denyer/pstack-claude) translates Cursor primitives to Claude Code and Codex. This fork keeps that skill tree and adds Herdr as the orchestration transport.
+[pstack-claude](https://github.com/michael-denyer/pstack-claude) translates Cursor's pstack primitives to Claude Code and Codex. This fork keeps that skill tree and adds Herdr as the orchestration transport.
 
 - **pstack decides what work to do.** Playbooks, principles, decomposition, model roles, review, synthesis, and verification stay pstack concerns.
 - **Herdr decides how delegated agents run.** Panes, processes, CLI startup, account profiles, lifecycle state, waiting, blocked workers, and terminal output stay Herdr concerns.
-- **Claude Code and Codex remain the workers.** A Herdr agent is still a real `claude` or `codex` CLI process with its own context window.
+- **Claude Code and Codex remain the workers.** A Herdr agent is a real `claude` or `codex` CLI process with its own context window.
 
 There is only one `poteto-mode`, one `arena`, one `how`, one `interrogate`, and one copy of every other pstack workflow. Herdr support is an execution adapter, not a shadow skill tree.
 
