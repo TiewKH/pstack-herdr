@@ -5,7 +5,7 @@ description: "Fan out N parallel workers, drain them, and return one report. Use
 
 # Swarm
 
-On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill.
+On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill. When `HERDR_ENV=1`, read [the Herdr execution mapping](../poteto-mode/references/herdr-tools.md) and use `scripts/herdr-dispatch.ts` for every worker instead of native Agent/Task/spawn_agent delegation.
 
 Fan out N parallel workers. They may cover separate slices, race the same brief, or mix both. The parent waits, aggregates, and returns one report.
 
@@ -28,17 +28,17 @@ Open a todolist with one entry per phase before launching anything.
 
 ## Phase B: Fan out
 
-Spawn all N workers in one message with `subagent_type: "general-purpose"`, `run_in_background: true`, and the configured model. Claude Code subagents all run on this machine, so isolation comes from the worktree or output directory assigned in Phase A, not from a remote environment.
-
-When a worker must start from a non-default branch, check that branch out in the worker's own worktree and name the worktree path in its brief.
-
 Every brief stands alone. Include the goal, scope, exact slice or race arm, how to verify, and what to report. Reports use `PASS`, `ISSUES`, or `BLOCKED` with evidence.
 
-If a worker drops out, proceed with N-1 and note it.
+Under Herdr, write each brief to a temporary file and launch N concurrent dispatcher processes with `--role implementation` for writers or `--role explorer --readonly` for read-only workers. Pass each worker's assigned checkout/worktree through `--cwd`. Start all N dispatcher processes before waiting for results. Route configuration chooses the Claude/Codex profile. For a model race, pass the arm's model explicitly with `--model`.
+
+Outside Herdr, spawn all N workers in one message with `subagent_type: "general-purpose"`, `run_in_background: true`, and the configured model.
+
+When a worker must start from a non-default branch, check that branch out in the worker's own worktree and name the worktree path in its brief. If a worker drops out, proceed with N-1 and note it.
 
 ## Phase C: Aggregate
 
-Read the terminal results. For coverage, every required slice needs a result. For a race, apply the selection rule declared up front. Use first pass, rank all, or best-of. Do not paste raw worker dumps.
+Read the worker results. For coverage, every required slice needs a result. For a race, apply the selection rule declared up front. Use first pass, rank all, or best-of. Do not paste raw worker dumps.
 
 Keep a compact result table, one-line evidenced issues, and explicit gaps or dropouts.
 
