@@ -34,13 +34,15 @@ if (!mapping.includes("herdr-dispatch.ts")) {
   throw new Error("Herdr platform mapping does not point to the native dispatcher");
 }
 
-for (const skill of ["how", "arena", "interrogate", "swarm"]) {
+for (const skill of ["how", "arena", "interrogate", "swarm", "reflect"]) {
   const body = read(`plugins/pstack/skills/${skill}/SKILL.md`);
   if (!body.includes("herdr-dispatch")) throw new Error(`${skill} does not structurally route Herdr delegation`);
 }
 
-const feature = read("plugins/pstack/skills/poteto-mode/playbooks/feature.md");
-if (!feature.includes("herdr-dispatch")) throw new Error("feature playbook does not structurally route Herdr delegation");
+for (const playbook of ["feature", "autonomous-run"]) {
+  const body = read(`plugins/pstack/skills/poteto-mode/playbooks/${playbook}.md`);
+  if (!body.includes("herdr-dispatch")) throw new Error(`${playbook} playbook does not structurally route Herdr delegation`);
+}
 
 for (const role of [
   "explorer",
