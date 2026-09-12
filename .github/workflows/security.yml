@@ -5,7 +5,6 @@ on:
   push:
     branches: [main]
   schedule:
-    # Weekly, so a CVE published after merge still surfaces.
     - cron: "17 6 * * 1"
 
 permissions:
@@ -19,43 +18,32 @@ jobs:
   osv-scan:
     name: OSV vulnerability scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      # persist-credentials: false on every checkout — nothing here needs git
-      # auth after the clone, and a stored token can leak via artifacts.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Pinned to the image rather than google/osv-scanner-action, whose own
-      # README warns its behavior can change in a patch release.
-      #
-      # --include-git-root is required: the scanner skips the git root by
-      # default, and the only lockfile lives inside this repo. Without it the
-      # scan finds nothing and passes, which reads exactly like a clean result.
+      # The scanner needs outbound access for advisory data, but the repository
+      # is mounted read-only and the workflow token has contents:read only.
       - name: Scan lockfiles
         run: |
-          docker run --rm -v "$PWD:/src" \
+          docker run --rm -v "$PWD:/src:ro" \
             ghcr.io/google/osv-scanner:v2.5.1 \
             scan source --recursive --include-git-root /src \
             | tee osv-output.txt
           if grep -q 'No package sources found' osv-output.txt; then
-            echo "FAIL: osv-scanner found no lockfiles to scan; a silent pass is not a clean scan"
+            echo "FAIL: osv-scanner found no lockfiles to scan"
             exit 1
           fi
 
   zizmor:
     name: Workflow static analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Audits the workflows themselves: template injection, over-broad
-      # permissions, unpinned actions, credential persistence.
-      #
-      # advanced-security defaults to true and needs GitHub Advanced Security,
-      # which this repo does not have; annotations put findings on the diff
-      # instead. version defaults to "latest" — pinned so a zizmor release
-      # cannot change what this gate means.
       - uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
         with:
           version: "1.29.0"

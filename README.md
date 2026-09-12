@@ -4,6 +4,8 @@ Claude Code port of [poteto](https://x.com/poteto)'s [pstack](https://github.com
 
 > if you want to go fast, go deep first. pstack helps you write less, but higher quality code. rigorous agent workflows you can parallelize with confidence.
 
+This is the `pstack-herdr` fork. When `HERDR_ENV=1`, delegation uses [HERDR.md](HERDR.md) and [`herdr-tools.md`](plugins/pstack/skills/poteto-mode/references/herdr-tools.md). Install from `TiewKH/pstack-herdr` rather than the pstack-claude origin. Skill bodies keep Claude Agent/Task language; the Herdr mapping is the translation.
+
 This is not a verbatim copy. Skill bodies have been edited so every Cursor-specific primitive resolves to its Claude Code equivalent — see [Differences from upstream](#differences-from-upstream) for the full list. The exhaustive per-skill audit lives in [CHANGES.md](CHANGES.md); license attribution and the upstream pins live in [NOTICE.md](NOTICE.md) and `tools/upstream.json`.
 
 ## Install

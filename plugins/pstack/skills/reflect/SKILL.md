@@ -5,7 +5,7 @@ description: Spawn three parallel review subagents over the active transcript, s
 
 # Reflect
 
-On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill.
+On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill. When `HERDR_ENV=1`, read [the Herdr execution mapping](../poteto-mode/references/herdr-tools.md) before the first delegation.
 
 Mine the current conversation for durable learnings, then route them into skill edits.
 

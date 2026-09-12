@@ -1,0 +1,62 @@
+orchestration:
+  max_depth: 3
+  # Same budget for `agent start` readiness and `agent prompt --wait`.
+  default_timeout_ms: 180000
+
+profiles:
+  claude-main:
+    kind: claude
+    model: inherit
+    env:
+      CLAUDE_CONFIG_DIR: ~/.claude
+
+  # Add extra profiles only for separately authenticated CLI homes.
+  # Multiple workers may share one profile/subscription.
+  claude-a:
+    kind: claude
+    model: inherit
+    env:
+      CLAUDE_CONFIG_DIR: ~/.claude-a
+
+  codex-a:
+    kind: codex
+    model: inherit
+    env:
+      CODEX_HOME: ~/.codex-a
+
+roles:
+  explorer:
+    profiles: [codex-a, claude-a]
+    strategy: spread
+
+  implementation:
+    profiles: [codex-a, claude-a]
+    strategy: spread
+
+  difficult-implementation:
+    profiles: [claude-main, codex-a]
+    strategy: first
+
+  judgment:
+    profiles: [claude-main]
+    strategy: first
+
+  reviewer:
+    profiles: [claude-main, codex-a, claude-a]
+    strategy: spread
+
+  arena-candidate:
+    profiles: [claude-main, codex-a, claude-a]
+    strategy: spread
+
+  arena-judge:
+    profiles: [claude-main, codex-a]
+    strategy: spread
+
+  verifier:
+    profiles: [codex-a, claude-main]
+    strategy: spread
+
+  subcoordinator:
+    profiles: [claude-main]
+    strategy: first
