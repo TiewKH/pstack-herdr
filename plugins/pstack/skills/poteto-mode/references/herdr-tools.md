@@ -2,9 +2,23 @@
 
 When `HERDR_ENV=1`, pstack delegation uses the executable `scripts/herdr-dispatch.ts`. Do not use Claude Code `Agent`/`Task` or Codex `spawn_agent` for a delegation that this dispatcher can represent.
 
-This is a structural runtime rule, not a session-start hint. The dispatcher calls the installed `herdr` binary itself and owns pane creation, profile environment, agent startup, prompt delivery, lifecycle waiting, output reads, and delegation depth.
+This is a structural runtime rule, not a session-start hint. Skills and playbooks keep their native spawn language. This file is the translation, the same way `codex-tools.md` is the Codex translation.
 
-## Dispatch
+The dispatcher calls the installed `herdr` binary itself and owns pane creation, profile environment, agent startup, prompt delivery, lifecycle waiting, output reads, and delegation depth.
+
+## Tool actions
+
+| pstack / Claude action | Herdr equivalent |
+|------------------------|------------------|
+| Dispatch a subagent (`Agent` / `Task`) | `herdr-dispatch.ts` |
+| Dispatch N parallel subagents in one turn | N dispatcher processes launched concurrently, then collect results |
+| `subagent_type` | ignored; pass the semantic pstack `--role` |
+| `model` | omit unless overriding; `--role` selects a profile from `~/.config/pstack-herdr/routes.yaml` |
+| `readonly: true` | `--readonly` |
+| `readonly: false` because Claude Ask mode strips MCP | still pass `--readonly`; it disables write tools and does not use Ask/plan mode |
+| `isolation: "worktree"` / exclusive branch | caller creates the worktree or branch, then passes it as `--cwd` |
+| `run_in_background: true` | omit `--wait`; drain later through Herdr agent state and output |
+| Wait for a subagent result | `--wait` |
 
 Write substantial worker prompts to a temporary file, then invoke:
 
@@ -17,9 +31,9 @@ bun <poteto-mode>/scripts/herdr-dispatch.ts \
   --wait
 ```
 
-Use `--readonly` for explorers, reviewers, judges, and other workers that must not edit. The flag records intent; the brief must still prohibit writes because Claude/Codex permissions are runtime-specific.
+`--readonly` prepends a no-write constraint to the prompt and passes Claude `--disallowedTools Write,Edit` or Codex `--sandbox read-only`. The brief must still prohibit writes.
 
-Use `--profile`, `--kind`, or `--model` only to override routing deliberately. Normally the semantic `--role` selects a profile from `~/.config/pstack-herdr/routes.yaml`.
+Use `--profile`, `--kind`, or `--model` only to override routing deliberately.
 
 For parallel fan-out, launch dispatcher processes concurrently rather than dispatching one and waiting before starting the next. Each dispatcher creates its own Herdr pane and agent. Collect each JSON result after all launches have begun.
 
@@ -43,9 +57,26 @@ The caller chooses `--cwd`. Read-only workers may share the current checkout. Co
 
 ## Result handling
 
-With `--wait`, the dispatcher returns JSON containing the Herdr agent name, pane, selected profile, kind, nesting depth, lifecycle status, blocked flag, and recent agent output. `blocked: true` is not completion. Inspect the worker in Herdr and resolve the approval/question deliberately.
+With `--wait`, the dispatcher returns JSON containing the Herdr agent name, pane, selected profile, kind, nesting depth, lifecycle status, blocked flag, and recent agent output. `blocked: true` is not completion. Inspect the worker in Herdr and resolve the approval/question deliberately. `unknown` is not proof of completion.
 
 The dispatcher refuses to run outside `HERDR_ENV=1` and refuses recursive delegation at the configured depth limit.
+
+## Per-skill notes
+
+Most skills need only the table above. These need one more mapping:
+
+| Skill | On Herdr |
+|-------|----------|
+| `how` | Explorers and the simple explainer use `--role explorer --readonly`. The complex synthesizer uses `--role judgment --readonly`. |
+| `why` | Investigators use `--role explorer --readonly`. The synthesizer uses `--role judgment --readonly`. Do not skip `--readonly` to preserve MCP; the flag does not use Ask mode. |
+| `interrogate` | Reviewers use `--role reviewer --readonly`. Keep panel diversity through routing profiles or `--model`. |
+| `arena` | Candidates use `--role arena-candidate` with an isolated `--cwd`. The judge uses `--role arena-judge --readonly`. |
+| `swarm` | Writers use `--role implementation`. Read-only workers use `--role explorer --readonly` or `--role verifier --readonly`. |
+| `reflect` | Reviewers use `--role reviewer --readonly`. The synthesizer uses `--role judgment --readonly`. |
+| Feature / bug-fix / refactoring / perf-issue / hillclimb | Implementation delegates use `--role implementation`, or `difficult-implementation` for concurrency, algorithms, or cross-cutting work, with an exclusive writer `--cwd`. |
+| Eval | Candidates use `--role arena-candidate` in sanitized directories. The judge uses `--role arena-judge --readonly`. |
+| Orchestrate / autopilot | Owners that must themselves delegate use `--role subcoordinator`. Direct writers use `--role implementation`. Verifiers use `--role verifier --readonly`. |
+| Autonomous run | The watcher uses `--role explorer` without `--wait`. |
 
 ## Native fallback
 

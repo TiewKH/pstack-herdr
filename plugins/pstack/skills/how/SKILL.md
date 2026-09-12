@@ -5,7 +5,7 @@ description: "Use for \"how does X work\", code walkthroughs before changing som
 
 # How
 
-On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill. When `HERDR_ENV=1`, Herdr takes precedence for delegation: read [the Herdr execution mapping](../poteto-mode/references/herdr-tools.md) and launch every explorer/explainer through `scripts/herdr-dispatch.ts` with role `explorer`, rather than using the native Agent/Task/spawn_agent primitive.
+On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill. When `HERDR_ENV=1`, read [the Herdr execution mapping](../poteto-mode/references/herdr-tools.md) before the first delegation.
 
 Explore the codebase to answer "how does X work?" questions. Produce architectural explanations at the level of a senior engineer onboarding onto a subsystem, enough to build a working mental model, not so much that it reads like annotated source code.
 
@@ -20,11 +20,7 @@ When in doubt, take the simple path.
 
 ## Step 2a. Explore (complex questions only)
 
-Decompose the question into 2 to 4 exploration angles, each a distinct slice of the subsystem. Spawn all explorers concurrently.
-
-On Herdr, write each filled explorer prompt to a temporary file and launch concurrent `herdr-dispatch.ts --role explorer --name <unique-name> --prompt-file <file> --cwd "$PWD" --readonly --wait` processes. Start all dispatcher processes before waiting for any one result.
-
-Outside Herdr use the native subagent configuration:
+Decompose the question into 2 to 4 exploration angles, each a distinct slice of the subsystem. Spawn all explorers in a single message:
 
 - `subagent_type`: `general-purpose`
 - `model`: your configured how-explorer model (default in [Models](#models))
@@ -34,7 +30,7 @@ Each explorer gets the prompt in `references/explorer-prompt.md` with its angle 
 
 ## Step 2b. Direct Explain (simple questions)
 
-On Herdr, dispatch one read-only worker with role `explorer` and the filled explainer prompt. Outside Herdr spawn one Task subagent:
+Spawn one Task subagent that explores and explains in one pass:
 
 - `subagent_type`: `general-purpose`
 - `model`: your configured how-explainer model (default in [Models](#models))
@@ -44,13 +40,13 @@ Build its prompt from `references/explainer-prompt.md` without the explorer-find
 
 ## Step 3. Synthesize (complex questions only)
 
-Once all explorers have returned, build `references/explainer-prompt.md` with every explorer's findings filled in.
-
-On Herdr, dispatch one read-only worker with role `judgment` and that prompt. Outside Herdr spawn one Task subagent:
+Once all explorers have returned, spawn one Task subagent to synthesize their findings into one explanation:
 
 - `subagent_type`: `general-purpose`
 - `model`: your configured how-explainer model (default in [Models](#models))
 - `readonly`: `true`
+
+Build its prompt from `references/explainer-prompt.md` with every explorer's findings filled in.
 
 ## Step 4. Present
 

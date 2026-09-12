@@ -57,14 +57,14 @@ Summary of structural changes inherited by this fork:
 
 ## pstack-herdr modifications
 
-This fork adds Herdr as an execution transport while preserving the pstack playbook and principle tree. Herdr-specific authored files include:
+This fork adds Herdr as an execution transport. Playbooks keep their native spawn language; `references/herdr-tools.md` is the Herdr translation the same way `codex-tools.md` is the Codex translation. Herdr-specific authored files include:
 
-- `plugins/pstack/skills/herdr-runtime/SKILL.md`
-- `plugins/pstack/skills/herdr-runtime/references/routes.example.yaml`
+- `plugins/pstack/skills/poteto-mode/scripts/herdr-dispatch.ts`
+- `plugins/pstack/skills/poteto-mode/references/herdr-tools.md`
 - `config/routes.example.yaml`
 - `tests/herdr-runtime.test.mjs`
-- Herdr activation additions to `plugins/pstack/hooks/session-start-context.md`
-- Herdr runtime documentation and attribution in `README.md` and this file
+- `tests/herdr-e2e.sh`
+- Herdr runtime documentation in `HERDR.md`, `README.md`, and this file
 
 Per the MIT license, modifications to pstack-derived material are permitted. Existing upstream copyright notices in source files, where present, are preserved.
 

@@ -28,45 +28,36 @@ profiles:
 roles:
   explorer:
     profiles: [codex-a, claude-a]
-    strategy: round-robin
-    workspace: shared-readonly
+    strategy: spread
 
   implementation:
     profiles: [codex-a, claude-a]
-    strategy: round-robin
-    workspace: isolated-writer
+    strategy: spread
 
   difficult-implementation:
     profiles: [claude-main, codex-a]
-    strategy: strongest-first
-    workspace: isolated-writer
+    strategy: first
 
   judgment:
     profiles: [claude-main]
-    strategy: strongest-first
-    workspace: shared-readonly
+    strategy: first
 
   reviewer:
     profiles: [claude-main, codex-a, claude-a]
     strategy: spread
-    workspace: shared-readonly
 
   arena-candidate:
     profiles: [claude-main, codex-a, claude-a]
     strategy: spread
-    workspace: isolated-writer
 
   arena-judge:
     profiles: [claude-main, codex-a]
     strategy: spread
-    workspace: shared-readonly
 
   verifier:
     profiles: [codex-a, claude-main]
-    strategy: round-robin
-    workspace: shared-readonly
+    strategy: spread
 
   subcoordinator:
     profiles: [claude-main]
-    strategy: strongest-first
-    workspace: role-dependent
+    strategy: first

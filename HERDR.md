@@ -17,6 +17,8 @@ Claude   Codex
 
 pstack still decides decomposition, semantic role, worktree isolation, synthesis, review, and verification. The dispatcher owns pane creation, account/profile environment, CLI startup, prompt delivery, lifecycle state, output reads, and recursive depth.
 
+Skills and playbooks keep Claude Agent/Task language. [`herdr-tools.md`](plugins/pstack/skills/poteto-mode/references/herdr-tools.md) translates it when `HERDR_ENV=1`, the same way `codex-tools.md` translates it on Codex.
+
 Outside Herdr, inherited Claude Code and Codex behavior remains available.
 
 ## Install
@@ -32,7 +34,7 @@ Start the main coordinator inside Herdr so `HERDR_ENV=1` is present, then enter 
 
 ## Routing and subscriptions
 
-Copy `config/routes.example.yaml` to `~/.config/pstack-herdr/routes.yaml` for explicit routing. Profiles may set `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. A single authenticated profile may back multiple worker processes; separate subscriptions/accounts use separately authenticated config homes.
+Copy `config/routes.example.yaml` to `~/.config/pstack-herdr/routes.yaml` for explicit routing. Profiles may set `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. Role `strategy` is `spread` (stable hash over the pool) or `first` (the first listed profile). A single authenticated profile may back multiple worker processes; separate subscriptions/accounts use separately authenticated config homes. Caller-owned `--cwd` is the isolation boundary.
 
 Roles are `explorer`, `implementation`, `difficult-implementation`, `judgment`, `reviewer`, `arena-candidate`, `arena-judge`, `verifier`, and `subcoordinator`.
 
@@ -67,7 +69,7 @@ Herdr routing is structural in the direct delegation paths for:
 - Architect inherits Herdr through How/Why/Arena/Interrogate.
 - Figure-it-out inherits it through Architect and whatever delegated execution playbook it designs.
 
-The repository contract test fails when these paths stop referencing the dispatcher. SessionStart does not own Herdr activation.
+The repository contract test fails when fan-out skills stop pointing at `herdr-tools.md`, or when playbooks grow inline Herdr dual-paths. SessionStart does not own Herdr activation.
 
 ## Workflow safety
 

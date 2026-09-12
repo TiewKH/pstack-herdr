@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const mode = join(import.meta.dir, "../plugins/pstack/skills/poteto-mode");
-const templateReference = readFileSync(join(mode, "references/multi-phase-plan-upstream.md"), "utf8");
-const template = templateReference.match(/^````markdown\n([\s\S]*?)^````$/m);
-if (!template) throw new Error("Multi-phase plan reference has no plan skeleton");
+const playbook = readFileSync(join(mode, "playbooks/multi-phase-plan.md"), "utf8");
+const template = playbook.match(/^````markdown\n([\s\S]*?)^````$/m);
+if (!template) throw new Error("Multi-phase playbook has no plan skeleton");
 const skeleton = template[1];
 
 function run(plan) {
