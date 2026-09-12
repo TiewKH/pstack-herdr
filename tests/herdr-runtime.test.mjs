@@ -21,7 +21,7 @@ for (const skill of ["how", "why", "arena", "interrogate", "swarm", "reflect"]) 
   const body = read(`plugins/pstack/skills/${skill}/SKILL.md`);
   if (!body.includes("herdr-dispatch")) throw new Error(`${skill} does not structurally route Herdr delegation`);
 }
-for (const playbook of ["feature", "bug-fix", "refactoring", "perf-issue", "hillclimb", "eval", "autonomous-run", "orchestrate", "autopilot-full", "autopilot-stack"]) {
+for (const playbook of ["feature", "bug-fix", "refactoring", "perf-issue", "hillclimb", "eval", "multi-phase-plan", "autonomous-run", "orchestrate", "autopilot-full", "autopilot-stack"]) {
   const body = read(`plugins/pstack/skills/poteto-mode/playbooks/${playbook}.md`);
   if (!body.includes("herdr-dispatch")) throw new Error(`${playbook} does not structurally route Herdr delegation`);
 }
