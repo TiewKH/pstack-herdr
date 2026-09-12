@@ -218,8 +218,6 @@ The official Herdr skill is authoritative for exact CLI syntax and lifecycle sem
 
 Blocked or stalled workers are inspected before any prompt is resent. The coordinator owns every child result and independently verifies the resulting artifact before reporting success.
 
-See [`HERDR.md`](HERDR.md) for the runtime-specific guide.
-
 ## Runtime mapping
 
 | pstack action | Herdr execution |
@@ -232,7 +230,7 @@ See [`HERDR.md`](HERDR.md) for the runtime-specific guide.
 | inspect a blocked worker | inspect agent state and recent output |
 | isolate a writer | create/use a dedicated worktree and start the pane there |
 
-The installed Herdr skill and binary remain authoritative for concrete commands.
+The installed Herdr skill and binary remain authoritative for concrete commands. Detailed pstack-specific execution policy lives with the implementation in [`plugins/pstack/skills/herdr-runtime/SKILL.md`](plugins/pstack/skills/herdr-runtime/SKILL.md).
 
 ## Project layout
 
@@ -250,8 +248,6 @@ The installed Herdr skill and binary remain authoritative for concrete commands.
 │   └── .codex-plugin/
 ├── tests/
 │   └── herdr-runtime.test.mjs
-├── HERDR.md
-├── NOTICE-HERDR.md
 ├── NOTICE.md
 └── README.md
 ```
@@ -308,7 +304,7 @@ Outside `HERDR_ENV=1`, existing Claude Code and Codex adaptations remain the bas
 
 pstack-herdr is an independent fork. It is not an official project of Lauren Tan, Michael Denyer, Cursor, Anthropic, OpenAI, or herdrdev.
 
-See [`NOTICE.md`](NOTICE.md), [`NOTICE-skills.md`](NOTICE-skills.md), [`NOTICE-HERDR.md`](NOTICE-HERDR.md), [`LICENSE`](LICENSE), and [`LICENSE-cursor-team-kit`](LICENSE-cursor-team-kit) for preserved notices and license boundaries.
+See [`NOTICE.md`](NOTICE.md), [`NOTICE-skills.md`](NOTICE-skills.md), [`LICENSE`](LICENSE), and [`LICENSE-cursor-team-kit`](LICENSE-cursor-team-kit) for preserved notices and license boundaries.
 
 ## Upstream synchronization
 
@@ -322,4 +318,4 @@ The Herdr integration is under active validation. Static CI covers the runtime c
 
 ## License
 
-The pstack-derived code remains under its preserved MIT terms. Imported cursor-team-kit components retain their MIT terms. Herdr itself and its official skill are Apache-2.0 and are referenced, not relicensed by this repository. See the notice files above for exact boundaries.
+The pstack-derived code remains under its preserved MIT terms. Imported cursor-team-kit components retain their MIT terms. Herdr itself and its official skill are Apache-2.0 and are referenced, not relicensed by this repository. See [`NOTICE.md`](NOTICE.md) for exact attribution and license boundaries.
