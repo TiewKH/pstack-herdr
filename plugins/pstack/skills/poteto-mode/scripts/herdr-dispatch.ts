@@ -85,8 +85,8 @@ function paneId(payload: unknown): string {
   return id;
 }
 function agentStatus(payload: unknown): string | undefined {
-  const value = payload as { result?: { agent?: { status?: string }; status?: string } };
-  return value.result?.agent?.status ?? value.result?.status;
+  const value = payload as { result?: { agent?: { status?: string; agent_status?: string }; status?: string } };
+  return value.result?.agent?.agent_status ?? value.result?.agent?.status ?? value.result?.status;
 }
 function resolvedPrompt(options: DispatchOptions): string {
   if (options.prompt && options.promptFile) throw new Error("use either --prompt or --prompt-file, not both");
