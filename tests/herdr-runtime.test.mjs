@@ -29,29 +29,21 @@ for (const term of [
 if (hook.includes("pstack:herdr-runtime") || hook.includes("HERDR_ENV=1")) {
   throw new Error("session-start hook must not be responsible for Herdr delegation");
 }
+if (!mapping.includes("herdr-dispatch.ts")) throw new Error("Herdr mapping does not point to the dispatcher");
 
-if (!mapping.includes("herdr-dispatch.ts")) {
-  throw new Error("Herdr platform mapping does not point to the native dispatcher");
-}
-
-for (const skill of ["how", "arena", "interrogate", "swarm", "reflect"]) {
+for (const skill of ["how", "why", "arena", "interrogate", "swarm", "reflect"]) {
   const body = read(`plugins/pstack/skills/${skill}/SKILL.md`);
   if (!body.includes("herdr-dispatch")) throw new Error(`${skill} does not structurally route Herdr delegation`);
 }
 
-for (const playbook of ["feature", "autonomous-run"]) {
+for (const playbook of ["feature", "autonomous-run", "orchestrate"]) {
   const body = read(`plugins/pstack/skills/poteto-mode/playbooks/${playbook}.md`);
-  if (!body.includes("herdr-dispatch")) throw new Error(`${playbook} playbook does not structurally route Herdr delegation`);
+  if (!body.includes("herdr-dispatch")) throw new Error(`${playbook} does not structurally route Herdr delegation`);
 }
 
 for (const role of [
-  "explorer",
-  "implementation",
-  "reviewer",
-  "arena-candidate",
-  "arena-judge",
-  "verifier",
-  "subcoordinator",
+  "explorer", "implementation", "difficult-implementation", "judgment", "reviewer",
+  "arena-candidate", "arena-judge", "verifier", "subcoordinator",
 ]) {
   if (!routes.includes(`${role}:`)) throw new Error(`route example is missing role: ${role}`);
 }
