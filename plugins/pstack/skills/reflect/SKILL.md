@@ -29,7 +29,9 @@ It covers the three layouts (flat `<id>.jsonl`, nested `<id>/<id>.jsonl`, subage
 
 ### 2. Spawn three reviewers in parallel
 
-One message, three `Agent` calls, `subagent_type: "general-purpose"`, explicit `model:` on each. Reviewers need MCP access for context lookups (tickets, chat threads, observability traces referenced in the transcript); pick a subagent_type that retains MCP access. The prompt forbids file writes; the parent applies edits.
+Reviewers need MCP access for context lookups (tickets, chat threads, observability traces referenced in the transcript). The prompt forbids file writes; the parent applies edits.
+
+When `HERDR_ENV=1`, write each completed reviewer template to its own temporary prompt file and start all three through `bun <poteto-mode>/scripts/herdr-dispatch.ts --role reviewer --name <unique-name> --prompt-file <file> --cwd "$PWD"` without `--wait`. After all three are started, wait/read them through the Herdr dispatcher/lifecycle described in `../poteto-mode/references/herdr-tools.md`. Do not use native `Agent`/`spawn_agent` for these reviewers while Herdr is healthy. Outside Herdr, use one message with three runtime-native `Agent` calls, `subagent_type: "general-purpose"`, and explicit `model:` on each.
 
 | Lens | `model` | Prompt template |
 |---|---|---|
@@ -37,11 +39,13 @@ One message, three `Agent` calls, `subagent_type: "general-purpose"`, explicit `
 | Tooling | your configured reflect-tooling model (default in [Models](#models)) | `references/tooling-reviewer.md` |
 | Divergent | your configured reflect-judgment model (default in [Models](#models)) | `references/divergent-reviewer.md` |
 
-Pass each template verbatim, substituting the transcript path or digest where marked. Reviewers return findings in the `Agent` response body.
+Pass each template verbatim, substituting the transcript path or digest where marked. Reviewers return findings in their runtime result.
 
 ### 3. Synthesize
 
-One `Agent` call, `subagent_type: "general-purpose"`, using your configured reflect-judgment model (default in [Models](#models)). Pick a subagent_type that retains MCP access — the synthesizer's quality check includes spot-verifying citations, which can require MCP access. Use `references/synthesizer.md` verbatim, with each reviewer's full output inlined where marked. The synthesizer returns a structured Accepted / Rejected / Backlog list.
+Use your configured reflect-judgment model (default in [Models](#models)). The synthesizer needs MCP access because its quality check includes spot-verifying citations. Use `references/synthesizer.md` verbatim, with each reviewer's full output inlined where marked. The synthesizer returns a structured Accepted / Rejected / Backlog list.
+
+When `HERDR_ENV=1`, write the completed synthesizer prompt to a temporary file and invoke `bun <poteto-mode>/scripts/herdr-dispatch.ts --role judgment --name <unique-synthesizer-name> --prompt-file <file> --cwd "$PWD" --wait`; consume the structured output from the dispatcher. Outside Herdr, use one runtime-native `Agent` call with `subagent_type: "general-purpose"`.
 
 ### 4. Structural enforcement check
 
