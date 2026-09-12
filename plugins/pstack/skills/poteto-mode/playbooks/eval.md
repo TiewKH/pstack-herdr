@@ -1,25 +1,15 @@
 ### Eval
 
-**You own the experiment design. Plan, blind, run, synthesize.**
+**You own experiment design. Plan, blind, run, synthesize.** When `HERDR_ENV=1`, candidates and judges use [`../references/herdr-tools.md`](../references/herdr-tools.md) and `herdr-dispatch.ts`.
 
-**Non-negotiables for blinding:**
+**Blinding is non-negotiable.** Candidate-visible paths and prompts must not reveal eval/test/judge/experiment/rubric/score/compare/benchmark/candidate/arena language. Candidates do not know peers exist. Judges see sanitized labels, never model/profile names.
 
-- No `eval`, `test`, `judge`, `experiment`, `rubric`, `score`, `compare`, `benchmark`, `candidate`, or `arena` in any directory, file, or prompt the candidate sees.
-- The candidate prompt looks like an organic user request. State the goal, not the meta.
-- No chain-eliciting cues. Don't ask the candidate to list which skills, principles, or files they applied. Ask for design notes generally and grade chain-following from code shape, not self-report.
-- Sanitize directory and slug names. Use project-shaped names a user might pick.
-- Don't tell the candidate other candidates exist.
-- The judge can know it's judging but sees outputs by sanitized label only, never by model name.
-- Comparing two variants: one judge scores both sets in a single pass on one scale, blind to which set each came from.
+1. Frame the variant and write a private 3-6 criterion rubric.
+2. Create one sanitized working directory per candidate.
+3. Author one organic user prompt with no measurement leakage.
+4. Spawn N parallel candidates. Under Herdr, dispatch each as `arena-candidate` in its own sanitized `--cwd`; launch all dispatcher processes before waiting. Outside Herdr use arena's native candidate behavior.
+5. Spawn one blinded judge on a different model/profile family. Under Herdr dispatch role `arena-judge`, `--readonly`, and `--wait`; its prompt contains sanitized outputs plus rubric only.
+6. Verify chain-following from each candidate's workspace-local transcript where the runtime exposes one. Never glob unrelated workspace transcripts. For Herdr/Codex workers without a compatible Claude transcript, grade from observable files, tool receipts, and output rather than fabricating transcript evidence.
+7. Read every candidate output yourself and compare it with the judge. Disagreement means bias or an ambiguous rubric and must be resolved before recommendation.
 
-**Steps:**
-
-1. **Frame.** State what variant is under test and what behavior counts as success. Write the rubric (3-6 concrete criteria) for the judge only. Hold it back from candidates.
-2. **Set up sanitized environments.** Per-candidate working dir with the variant in place. Plant any context an organic task would have: a project skeleton, the skills the candidate would naturally read.
-3. **Author one organic prompt.** What a user would type. No leakage of what's being measured.
-4. **Spawn N parallel candidates** on different models per the **arena** skill's Phase B. Each works in its own sanitized dir; same prompt to each.
-5. **Spawn one blinded judge** on a different model family per the **arena** skill's Phase C. Judge sees outputs by sanitized label and the rubric, never a model name.
-6. **Verify the chain from transcripts, not self-report.** Read each candidate's local transcript under Claude Code's per-project transcripts directory at `~/.claude/projects/<encoded-cwd>/` (one `*.jsonl` per session for this workspace). Do not glob across `~/.claude/projects/`; that crosses workspace boundaries and reads private chats from unrelated projects. Look at which files each candidate actually opened. Grade chain-following from the files it really read plus the shape of the code, never from the candidate's own claims.
-7. **Read every candidate output yourself** end to end. Compare to the judge's verdict. Disagreement means a model is biased or the rubric is ambiguous. Synthesize.
-
-**Reply:** variant under test, rubric, per-candidate notes, judge's verdict, your synthesis, and a recommendation for whether to promote the variant.
+**Reply:** variant, rubric, per-candidate notes, blinded verdict, synthesis, recommendation.
