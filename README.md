@@ -56,26 +56,21 @@ The coordinator stays alive and owns the human-facing result. Workers may recurs
 
 ## Requirements
 
-Install:
+Install [Herdr](https://herdr.dev), Claude Code and/or Codex CLI, Git, and the official Herdr Agent Skill.
 
-- [Herdr](https://herdr.dev)
-- Claude Code and/or Codex CLI
-- Git
-- the official Herdr Agent Skill
-
-Install the release-matched Herdr skill with the method recommended by Herdr. For example:
+For example:
 
 ```shell
 npx skills add herdrdev/herdr --skill herdr -g
 ```
 
-The Herdr runtime is activated only inside a Herdr-managed environment where `HERDR_ENV=1`. Outside Herdr, the existing pstack Claude/Codex behavior remains available.
+The Herdr runtime activates only inside a Herdr-managed environment where `HERDR_ENV=1`. Outside Herdr, the existing pstack Claude/Codex behavior remains available.
 
 ## Install pstack-herdr
 
 ### Claude Code
 
-This fork retains the Claude Code plugin layout from pstack-claude. Add this repository as the marketplace source and install `pstack`:
+This fork retains the Claude Code plugin layout from pstack-claude:
 
 ```text
 /plugin marketplace add TiewKH/pstack-herdr
@@ -86,8 +81,6 @@ Launch Claude Code from a Herdr pane. The SessionStart mandate detects `HERDR_EN
 
 ### Shared Agent Skills
 
-Codex and other Agent Skills runtimes can use the shared skill tree:
-
 ```shell
 git clone https://github.com/TiewKH/pstack-herdr
 cd pstack-herdr
@@ -95,7 +88,7 @@ mkdir -p ~/.agents/skills
 for s in plugins/pstack/skills/*/; do ln -s "$PWD/$s" ~/.agents/skills/"$(basename "$s")"; done
 ```
 
-Or install the tree with the skills CLI:
+Or:
 
 ```shell
 npx skills add https://github.com/TiewKH/pstack-herdr/tree/main/plugins/pstack/skills --skill "*" --agent "*" --yes
@@ -103,9 +96,9 @@ npx skills add https://github.com/TiewKH/pstack-herdr/tree/main/plugins/pstack/s
 
 ### Codex
 
-Codex uses the same `skills/` tree. For native Codex multi-agent operation outside Herdr, `multi_agent = true` remains supported. Inside Herdr, pstack delegation is routed through `pstack:herdr-runtime`, so workers can be Claude, Codex, or a mixture selected by the routing configuration.
+Codex uses the same `skills/` tree. Inside Herdr, pstack delegation is routed through `pstack:herdr-runtime`, so workers can be Claude, Codex, or a mixture selected by routing configuration.
 
-For Codex slash-command shortcuts, link the generated prompt stubs:
+For Codex slash-command shortcuts:
 
 ```shell
 mkdir -p ~/.codex/prompts
@@ -114,19 +107,17 @@ for c in plugins/pstack/.codex-plugin/prompts/*.md; do ln -s "$PWD/$c" ~/.codex/
 
 ## Quick start
 
-Start Herdr, open a pane for the coordinator, then run Claude Code or Codex there. For example:
-
 ```text
 herdr
   └── claude
        └── /poteto-mode implement this feature
 ```
 
-The coordinator can then choose a pstack playbook and spawn the required Herdr workers. A typical feature run may use Codex explorers, an isolated implementation worker, independent Claude/Codex reviewers, and a verifier while the root Claude session remains the coordinator.
+The coordinator chooses a pstack playbook and spawns the required Herdr workers. A feature run can use Codex explorers, an isolated implementation worker, independent Claude/Codex reviewers, and a verifier while the root Claude session remains the coordinator.
 
 ## One subscription is enough
 
-You do not need multiple subscriptions to use pstack-herdr. Multiple Herdr agents can use the same authenticated Claude or Codex profile:
+You do not need multiple subscriptions. Multiple Herdr agents can use the same authenticated profile:
 
 ```yaml
 profiles:
@@ -147,23 +138,11 @@ roles:
     pool: [claude-main]
 ```
 
-Each worker is a separate process and context window, but all workers using that profile share the provider account's usage, rate, and concurrency limits.
+Each worker is a separate process and context window, but workers using that profile share the provider account's usage, rate, and concurrency limits.
 
 ## Multiple subscriptions
 
-Multiple subscriptions are optional. They are useful when you intentionally maintain separately authenticated Claude or Codex accounts and want pstack to distribute roles across them.
-
-Use separate CLI config homes:
-
-```text
-~/.claude-main
-~/.claude-a
-~/.claude-b
-~/.codex-a
-~/.codex-b
-```
-
-Then route roles in `~/.config/pstack-herdr/routes.yaml`:
+Multiple subscriptions are optional. Use separate CLI config homes such as `~/.claude-main`, `~/.claude-a`, `~/.claude-b`, `~/.codex-a`, and `~/.codex-b`, then route roles in `~/.config/pstack-herdr/routes.yaml`:
 
 ```yaml
 version: 1
@@ -195,39 +174,31 @@ roles:
   explorer:
     strategy: round-robin
     pool: [codex-a, claude-a]
-
   implementation:
     strategy: first-available
     pool: [codex-a, claude-a]
-
   judgment:
     strategy: strongest-first
     pool: [claude-main, claude-a]
-
   reviewer:
     strategy: round-robin
     pool: [claude-a, codex-a]
-
   arena-candidate:
     strategy: spread
     pool: [claude-a, codex-a]
-
   arena-judge:
     strategy: strongest-first
     pool: [claude-main]
-
   verifier:
     strategy: first-available
     pool: [codex-a, claude-a]
 ```
 
-Authenticate each profile using the vendor CLI. Do not copy authentication tokens, cookies, or session files between profiles.
-
-A complete example lives at [`config/routes.example.yaml`](config/routes.example.yaml).
+Authenticate each profile using the vendor CLI. Do not copy authentication tokens, cookies, or session files between profiles. A complete example lives at [`config/routes.example.yaml`](config/routes.example.yaml).
 
 ## Recursive delegation
 
-Original pstack does not require every worker to be a leaf. Some workflows deliberately use coordinators that spawn workers and verifiers. pstack-herdr preserves that behavior.
+Original pstack allows hierarchical delegation. pstack-herdr preserves it:
 
 ```text
 root coordinator
@@ -240,11 +211,9 @@ root coordinator
       └── verifier
 ```
 
-`PSTACK_HERDR_DEPTH` tracks nesting. The default maximum is `3`. Workers only create descendants when the active pstack workflow requires delegation or pstack's context-window discipline calls for it. Judges and verifiers are leaves by default.
+`PSTACK_HERDR_DEPTH` tracks nesting. The default maximum is `3`. Workers create descendants only when the active pstack workflow requires delegation or context-window discipline calls for it. Judges and verifiers are leaves by default.
 
 ## Parallel writers and worktrees
-
-Read-only exploration can share a checkout. Parallel writers cannot.
 
 - Read-only explorers and reviewers may share the coordinator's checkout.
 - One writer may share it only when no concurrent writer exists and the playbook permits it.
@@ -256,21 +225,13 @@ The runtime consults the installed Herdr worktree commands instead of baking ver
 
 ## Herdr lifecycle
 
-The official Herdr skill is the authority for exact CLI syntax and lifecycle semantics. pstack-herdr deliberately does not duplicate that documentation.
-
-The runtime distinguishes:
-
-- `idle` and `done`, which are settled states;
-- `blocked`, which means the agent is waiting for an approval or question;
-- `unknown`, which is not proof that the worker finished.
+The official Herdr skill is authoritative for exact CLI syntax and lifecycle semantics. pstack-herdr distinguishes `idle` and `done` as settled states, `blocked` as waiting on an approval or question, and `unknown` as not proof of completion.
 
 Blocked or stalled workers are inspected before any prompt is resent. The coordinator owns every child result and independently verifies the resulting artifact before reporting success.
 
 See [`HERDR.md`](HERDR.md) for the runtime-specific guide.
 
 ## Runtime mapping
-
-At a high level:
 
 | pstack action | Herdr execution |
 | --- | --- |
@@ -282,47 +243,37 @@ At a high level:
 | inspect a blocked worker | inspect agent state and recent output |
 | isolate a writer | create/use a dedicated worktree and start the pane there |
 
-The installed Herdr skill and binary remain authoritative for the concrete commands.
+The installed Herdr skill and binary remain authoritative for concrete commands.
 
 ## Project layout
 
 ```text
 .
 ├── config/
-│   └── routes.example.yaml           # Herdr profile and role routing example
+│   └── routes.example.yaml
 ├── plugins/pstack/
 │   ├── skills/
-│   │   ├── herdr-runtime/            # internal Herdr execution adapter
-│   │   ├── poteto-mode/              # canonical pstack entry point
-│   │   └── ...                       # upstream-derived pstack skills
-│   ├── hooks/                        # SessionStart routing for Claude Code
-│   ├── agents/                       # Claude-native agents for non-Herdr use
-│   └── .codex-plugin/                # Codex manifest and generated prompts
+│   │   ├── herdr-runtime/
+│   │   ├── poteto-mode/
+│   │   └── ...
+│   ├── hooks/
+│   ├── agents/
+│   └── .codex-plugin/
 ├── tests/
-│   └── herdr-runtime.test.mjs        # Herdr integration contract tests
-├── HERDR.md                          # Herdr-specific usage guide
-├── NOTICE-HERDR.md                   # Herdr Apache-2.0 attribution
-├── NOTICE.md                         # upstream attribution
+│   └── herdr-runtime.test.mjs
+├── HERDR.md
+├── NOTICE-HERDR.md
+├── NOTICE.md
 └── README.md
 ```
 
 ## Upstream pstack-claude compatibility
 
-pstack-herdr is a fork of [Michael Denyer's pstack-claude](https://github.com/michael-denyer/pstack-claude). The fork intentionally preserves the upstream skill/playbook structure so future pstack-claude changes can be synchronized without maintaining a second Herdr-specific copy of every workflow.
+pstack-herdr is a fork of [Michael Denyer's pstack-claude](https://github.com/michael-denyer/pstack-claude). The fork preserves the upstream skill/playbook structure so future pstack-claude changes can be synchronized without maintaining a second Herdr-specific copy of every workflow.
 
-Outside `HERDR_ENV=1`, the existing Claude Code and Codex runtime adaptations remain the baseline. The upstream Codex mapping continues to live in [`plugins/pstack/skills/poteto-mode/references/codex-tools.md`](plugins/pstack/skills/poteto-mode/references/codex-tools.md). Herdr adds a transport layer rather than replacing that portability work.
-
-The shared Agent Skills tree remains usable by Prime Agent, opencode, Gemini CLI, and other compatible runtimes. Herdr-specific delegation is only selected when the session is actually Herdr-managed.
-
-## Dependencies inherited from pstack-claude
-
-The upstream port references Claude Code's bundled `run` and `loop` skills, GitHub CLI for PR workflows, Bun for the vendored orchestration tooling, and optional tools such as Graphite, `jq`, and `rg` for specific playbooks. Skill-authoring routes use Anthropic's `plugin-dev:skill-development` skill when available.
-
-Those dependencies and the upstream portability machinery are retained. Herdr is an additional runtime dependency only when you want Herdr-backed orchestration.
+Outside `HERDR_ENV=1`, existing Claude Code and Codex adaptations remain the baseline. The upstream Codex mapping remains at [`plugins/pstack/skills/poteto-mode/references/codex-tools.md`](plugins/pstack/skills/poteto-mode/references/codex-tools.md). The shared Agent Skills tree remains usable by Prime Agent, opencode, Gemini CLI, and other compatible runtimes.
 
 ## Slash commands
-
-The public pstack workflows remain the same:
 
 | command | use it when |
 | --- | --- |
@@ -360,7 +311,7 @@ The public pstack workflows remain the same:
 
 ## Attribution and lineage
 
-This repository stands on three projects. Their work should remain visible when this fork is redistributed or modified.
+This repository stands on three projects.
 
 **pstack.** The original pstack engineering workflows and Poteto Mode were created by [Lauren Tan (poteto)](https://x.com/poteto) and published in [cursor/plugins](https://github.com/cursor/plugins/tree/main/pstack) under the MIT License.
 
@@ -370,18 +321,18 @@ This repository stands on three projects. Their work should remain visible when 
 
 pstack-herdr is an independent fork. It is not an official project of Lauren Tan, Michael Denyer, Cursor, Anthropic, OpenAI, or herdrdev.
 
-See [`NOTICE.md`](NOTICE.md), [`NOTICE-skills.md`](NOTICE-skills.md), [`NOTICE-HERDR.md`](NOTICE-HERDR.md), [`LICENSE`](LICENSE), and [`LICENSE-cursor-team-kit`](LICENSE-cursor-team-kit) for the preserved notices and license boundaries.
+See [`NOTICE.md`](NOTICE.md), [`NOTICE-skills.md`](NOTICE-skills.md), [`NOTICE-HERDR.md`](NOTICE-HERDR.md), [`LICENSE`](LICENSE), and [`LICENSE-cursor-team-kit`](LICENSE-cursor-team-kit) for preserved notices and license boundaries.
 
 ## Upstream synchronization
 
-The fork keeps pstack-claude's synchronization machinery under `tools/`. When upstream pstack or pstack-claude changes, prefer a focused sync/rebase that preserves the Herdr adapter as a small runtime-specific layer.
+The fork keeps pstack-claude's synchronization machinery under `tools/`. When upstream changes, prefer a focused sync/rebase that preserves the Herdr adapter as a small runtime-specific layer.
 
-The design rule is simple: do not rewrite upstream playbooks merely to mention Herdr. Put transport behavior in `herdr-runtime`; change a shared skill only when the semantic contract truly needs to know about the runtime.
+The design rule is simple: do not rewrite upstream playbooks merely to mention Herdr. Put transport behavior in `herdr-runtime`; change a shared skill only when its semantic contract truly needs to know about the runtime.
 
 ## Status
 
-The Herdr integration is under active validation. Static CI covers the runtime contract, routing configuration, and skill-tree invariants. Live Claude/Codex execution with authenticated Herdr profiles should be treated as the final acceptance test before relying on the fork for unattended or long-running orchestration.
+The Herdr integration is under active validation. Static CI covers the runtime contract, routing configuration, and skill-tree invariants. Live Claude/Codex execution with authenticated Herdr profiles is the final acceptance test before relying on the fork for unattended or long-running orchestration.
 
 ## License
 
-The pstack-derived code remains under its preserved MIT terms. Imported cursor-team-kit components retain their MIT terms. Herdr itself and its official skill are Apache-2.0 and are referenced, not relicensed by this repository. See the notice files above for the exact boundaries.
+The pstack-derived code remains under its preserved MIT terms. Imported cursor-team-kit components retain their MIT terms. Herdr itself and its official skill are Apache-2.0 and are referenced, not relicensed by this repository. See the notice files above for exact boundaries.
