@@ -1,55 +1,50 @@
 # pstack-herdr runtime
 
-This fork preserves the upstream `pstack-claude` README and generated command table. Herdr-specific execution lives here and in `plugins/pstack/skills/poteto-mode/references/herdr-tools.md`.
+This fork preserves the upstream `pstack-claude` command surface while making Herdr the structural delegation transport whenever `HERDR_ENV=1`.
 
 ## Architecture
 
-When `HERDR_ENV=1`, delegation-heavy pstack workflows invoke `plugins/pstack/skills/poteto-mode/scripts/herdr-dispatch.ts` instead of relying on a SessionStart instruction to reinterpret native subagents.
-
 ```text
-poteto-mode / routed pstack skill
-              |
-              v
-      herdr-dispatch.ts
-              |
-      +-------+--------+
-      |                |
- Claude CLI         Codex CLI
- worker             worker
+pstack coordinator
+      |
+      v
+herdr-dispatch.ts
+      |
+ +----+----+
+ |         |
+Claude   Codex
 ```
 
-The dispatcher calls Herdr directly to split a pane, apply the selected profile environment, start a `claude` or `codex` process, prompt it, wait when requested, inspect lifecycle state, and read output. Outside `HERDR_ENV=1`, inherited Claude/Codex behavior remains unchanged.
+pstack still decides decomposition, semantic role, worktree isolation, synthesis, review, and verification. The dispatcher owns pane creation, account/profile environment, CLI startup, prompt delivery, lifecycle state, output reads, and recursive depth.
+
+Outside Herdr, inherited Claude Code and Codex behavior remains available.
 
 ## Install
 
-Install this fork using the same Claude Code or shared Agent Skills mechanisms documented in the main README, substituting `TiewKH/pstack-herdr` for the upstream repository URL.
-
-Install the Herdr integrations for the worker CLIs you use:
+Use the installation mechanisms in the main README, substituting `TiewKH/pstack-herdr` for the upstream repository. Install the Herdr CLI integrations you use:
 
 ```sh
 herdr integration install claude
 herdr integration install codex
 ```
 
-Start the main coordinator from inside Herdr so it receives `HERDR_ENV=1`, then enter `poteto-mode` normally.
+Start the main coordinator inside Herdr so `HERDR_ENV=1` is present, then enter poteto-mode normally.
 
-## Routing
+## Routing and subscriptions
 
-Routing is optional. Without a matching configured role, set `PSTACK_HERDR_PARENT_KIND=claude` or `codex` and children use that CLI kind. For explicit account/model routing, copy `config/routes.example.yaml` to `~/.config/pstack-herdr/routes.yaml`.
+Copy `config/routes.example.yaml` to `~/.config/pstack-herdr/routes.yaml` for explicit routing. Profiles may set `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. A single authenticated profile may back multiple worker processes; separate subscriptions/accounts use separately authenticated config homes.
 
-Profiles may set `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. One authenticated profile may back many independent worker processes. Multiple subscriptions are optional and use separately authenticated config homes; do not copy credentials between them.
-
-Semantic roles include `explorer`, `implementation`, `difficult-implementation`, `judgment`, `reviewer`, `arena-candidate`, `arena-judge`, `verifier`, and `subcoordinator`.
+Roles are `explorer`, `implementation`, `difficult-implementation`, `judgment`, `reviewer`, `arena-candidate`, `arena-judge`, `verifier`, and `subcoordinator`.
 
 ## Recursive delegation
 
-The dispatcher passes `PSTACK_HERDR_DEPTH=<parent + 1>` and `PSTACK_HERDR_PARENT_KIND=<child kind>` into every new pane. Default maximum depth is 3, preserving pstack's coordinator -> subcoordinator -> worker topology without unbounded recursive spawning.
+Each child receives `PSTACK_HERDR_DEPTH=<parent + 1>` and `PSTACK_HERDR_PARENT_KIND=<child kind>`. Default `max_depth` is 3. This preserves coordinator -> subcoordinator -> worker/verifier nesting without unbounded fan-out.
 
 ## Worktrees
 
-pstack decides isolation before dispatch. Read-only explorers/reviewers may share a checkout. Concurrent writers and arena candidates receive separate worktrees or writable output directories. The selected checkout is passed with `--cwd`, so Herdr starts the worker in the correct filesystem scope.
+Read-only explorers/reviewers may share a checkout. Concurrent writers and arena/eval candidates receive isolated writable worktrees or directories. The caller passes the selected location through `--cwd`.
 
-## Direct dispatcher shape
+## Dispatcher
 
 ```sh
 bun <poteto-mode>/scripts/herdr-dispatch.ts \
@@ -60,13 +55,31 @@ bun <poteto-mode>/scripts/herdr-dispatch.ts \
   --wait
 ```
 
-Normally a pstack workflow constructs this command.
+For parallel fan-out, launch all dispatcher processes before waiting. `blocked` is not completion; inspect the worker's approval/question. `unknown` is not proof of completion.
+
+## Migrated delegation paths
+
+Herdr routing is structural in the direct delegation paths for:
+
+- Feature, Bug fix, Refactoring, Perf issue, Hillclimb, Eval, Autonomous run.
+- How, Why, Arena, Swarm, Interrogate, Reflect.
+- Orchestrate, Autopilot-full, and Autopilot-stack.
+- Architect inherits Herdr through How/Why/Arena/Interrogate.
+- Figure-it-out inherits it through Architect and whatever delegated execution playbook it designs.
+
+The repository contract test fails when these paths stop referencing the dispatcher. SessionStart does not own Herdr activation.
+
+## Workflow safety
+
+CI and security workflows use repository-wide `contents: read`, disable checkout credential persistence, do not consume repository secrets, pin GitHub Actions by commit SHA, give lint containers read-only checkout mounts, and cap job runtime. Pull-request workflows therefore execute untrusted repository code without a write-capable GitHub token.
+
+The OSV scanner requires outbound network access to obtain advisory data. Its checkout mount is read-only and its workflow token remains read-only. Review scanner version changes deliberately.
 
 ## Attribution
 
 - pstack / Poteto Mode: Lauren Tan (poteto), MIT.
-- pstack-claude portable Claude/Codex port: Michael Denyer; this repository is a fork of that work.
+- pstack-claude portable Claude/Codex port: Michael Denyer.
 - imported cursor-team-kit components: Cursor, MIT.
-- Herdr: herdrdev, Apache-2.0. Herdr is an external runtime and is not vendored or relicensed here.
+- Herdr: herdrdev, Apache-2.0; external runtime, not vendored or relicensed.
 
-See `NOTICE.md`, `NOTICE-skills.md`, `LICENSE`, and `LICENSE-cursor-team-kit` for preserved upstream attribution and license boundaries.
+See `NOTICE.md`, `NOTICE-skills.md`, `LICENSE`, and `LICENSE-cursor-team-kit`.
