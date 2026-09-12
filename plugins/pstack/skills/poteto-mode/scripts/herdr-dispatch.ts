@@ -7,6 +7,7 @@ import { ensureDependenciesInstalled } from "./bootstrap.ts";
 
 export type AgentKind = "claude" | "codex";
 export type RouteStrategy = "spread" | "first";
+export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
 export interface Profile {
   kind: AgentKind;
@@ -50,18 +51,20 @@ export interface DispatchHandle {
 }
 
 export interface DispatchSettled extends DispatchHandle {
-  status: string;
+  status: AgentStatus;
   blocked: boolean;
   output: string;
 }
 
 export type DispatchResult = DispatchHandle | DispatchSettled;
 
-interface CommandResult {
+export interface CommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
 }
+
+export type HerdrExec = (args: string[]) => Promise<CommandResult>;
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
@@ -100,6 +103,21 @@ function optionalNonNegativeInt(value: unknown, label: string): number | undefin
 function parseAgentKind(value: unknown, label: string): AgentKind {
   if (value === "claude" || value === "codex") return value;
   throw new Error(`${label} must be claude or codex`);
+}
+
+export function parseAgentStatus(value: unknown): AgentStatus {
+  switch (value) {
+    case "idle":
+    case "working":
+    case "blocked":
+    case "done":
+    case "unknown":
+      return value;
+    default:
+      throw new Error(
+        `Herdr agent get returned invalid result.agent.agent_status: ${String(value)}`
+      );
+  }
 }
 
 function parseStrategy(value: unknown, label: string): RouteStrategy {
@@ -287,8 +305,8 @@ function agentStartTail(
   return args.length === 0 ? [] : ["--", ...args];
 }
 
-async function run(args: string[]): Promise<CommandResult> {
-  const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
+async function spawnHerdr(args: string[]): Promise<CommandResult> {
+  const proc = Bun.spawn(["herdr", ...args], { stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -297,8 +315,11 @@ async function run(args: string[]): Promise<CommandResult> {
   return { stdout, stderr, exitCode };
 }
 
-async function runHerdrCommand(args: string[]): Promise<CommandResult> {
-  const result = await run(["herdr", ...args]);
+async function runHerdrCommand(
+  args: string[],
+  exec: HerdrExec = spawnHerdr
+): Promise<CommandResult> {
+  const result = await exec(args);
   if (result.exitCode !== 0) {
     const detail = result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`;
     throw new Error(`herdr ${args.join(" ")} failed: ${detail}`);
@@ -306,8 +327,8 @@ async function runHerdrCommand(args: string[]): Promise<CommandResult> {
   return result;
 }
 
-async function runHerdrJson(args: string[]): Promise<unknown> {
-  const result = await runHerdrCommand(args);
+async function runHerdrJson(args: string[], exec: HerdrExec = spawnHerdr): Promise<unknown> {
+  const result = await runHerdrCommand(args, exec);
   const text = result.stdout.trim();
   if (!text) return {};
   try {
@@ -320,34 +341,25 @@ async function runHerdrJson(args: string[]): Promise<unknown> {
   }
 }
 
-async function runHerdrText(args: string[]): Promise<string> {
-  const result = await runHerdrCommand(args);
+async function runHerdrText(args: string[], exec: HerdrExec = spawnHerdr): Promise<string> {
+  const result = await runHerdrCommand(args, exec);
   return result.stdout.replace(/\s+$/, "");
 }
 
-function nestedRecord(value: unknown, key: string): Record<string, unknown> | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  const nested = (value as Record<string, unknown>)[key];
-  if (typeof nested !== "object" || nested === null || Array.isArray(nested)) return undefined;
-  return nested as Record<string, unknown>;
-}
-
-function paneId(payload: unknown): string {
-  const pane = nestedRecord(nestedRecord(payload, "result"), "pane");
-  const id = pane?.pane_id;
+export function paneId(payload: unknown): string {
+  const root = asObject(payload, "herdr pane split");
+  const pane = asObject(asObject(root.result, "result").pane, "result.pane");
+  const id = pane.pane_id;
   if (typeof id !== "string" || id.length === 0) {
     throw new Error("Herdr pane split returned no result.pane.pane_id");
   }
   return id;
 }
 
-function agentStatus(payload: unknown): string {
-  const result = nestedRecord(payload, "result") ?? {};
-  const agent = nestedRecord(result, "agent") ?? {};
-  for (const value of [agent.agent_status, agent.status, result.status]) {
-    if (typeof value === "string" && value.length > 0) return value;
-  }
-  return "unknown";
+export function agentStatus(payload: unknown): AgentStatus {
+  const root = asObject(payload, "herdr agent get");
+  const agent = asObject(asObject(root.result, "result").agent, "result.agent");
+  return parseAgentStatus(agent.agent_status);
 }
 
 function resolvedPrompt(options: DispatchOptions): string {
@@ -397,9 +409,9 @@ function chooseProfile(
   return { name: "parent", profile: { kind, model: options.model ?? "inherit", env: {} } };
 }
 
-async function closePane(pane: string): Promise<void> {
+async function closePane(pane: string, exec: HerdrExec): Promise<void> {
   try {
-    await runHerdrCommand(["pane", "close", pane]);
+    await runHerdrCommand(["pane", "close", pane], exec);
   } catch {
     // Keep the original start/prompt error; a failed cleanup must not replace it.
   }
@@ -407,14 +419,18 @@ async function closePane(pane: string): Promise<void> {
 
 export async function dispatch(
   options: DispatchOptions,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  exec: HerdrExec = spawnHerdr
 ): Promise<DispatchResult> {
   if (env.HERDR_ENV !== "1") throw new Error("herdr-dispatch requires HERDR_ENV=1");
   if (!AGENT_NAME.test(options.name)) throw new Error("--name must match [a-z][a-z0-9_-]{0,31}");
   const config = loadRoutes(options.routes, env);
   const chosen = chooseProfile(config, options, env);
   const nesting = depth(config, env);
-  const timeout = options.timeout ?? config.orchestration?.default_timeout_ms ?? 180000;
+  const timeout =
+    optionalNonNegativeInt(options.timeout, "--timeout") ??
+    config.orchestration?.default_timeout_ms ??
+    180000;
   const prompt = applyReadonlyPrompt(resolvedPrompt(options), options.readonly);
   const childEnv = {
     ...(chosen.profile.env ?? {}),
@@ -432,7 +448,7 @@ export async function dispatch(
     "--no-focus",
     ...envFlags(childEnv),
   ];
-  const pane = paneId(await runHerdrJson(splitArgs));
+  const pane = paneId(await runHerdrJson(splitArgs, exec));
   const startArgs = [
     "agent",
     "start",
@@ -441,17 +457,19 @@ export async function dispatch(
     chosen.profile.kind,
     "--pane",
     pane,
+    "--timeout",
+    String(timeout),
     ...agentStartTail(chosen.profile.kind, options.model ?? chosen.profile.model, options.readonly),
   ];
-  try {
-    await runHerdrJson(startArgs);
-  } catch (error) {
-    await closePane(pane);
-    throw error;
-  }
   const promptArgs = ["agent", "prompt", options.name, prompt];
   if (options.wait) promptArgs.push("--wait", "--timeout", String(timeout));
-  await runHerdrJson(promptArgs);
+  try {
+    await runHerdrJson(startArgs, exec);
+    await runHerdrJson(promptArgs, exec);
+  } catch (error) {
+    await closePane(pane, exec);
+    throw error;
+  }
   const handle: DispatchHandle = {
     agent: options.name,
     pane,
@@ -460,16 +478,11 @@ export async function dispatch(
     depth: nesting.next,
   };
   if (!options.wait) return handle;
-  const status = agentStatus(await runHerdrJson(["agent", "get", options.name]));
-  const output = await runHerdrText([
-    "agent",
-    "read",
-    options.name,
-    "--source",
-    "recent-unwrapped",
-    "--lines",
-    "240",
-  ]);
+  const status = agentStatus(await runHerdrJson(["agent", "get", options.name], exec));
+  const output = await runHerdrText(
+    ["agent", "read", options.name, "--source", "recent-unwrapped", "--lines", "240"],
+    exec
+  );
   return { ...handle, status, blocked: status === "blocked", output };
 }
 
@@ -487,7 +500,14 @@ async function main(): Promise<void> {
     .option("--kind <kind>", "fallback agent kind, claude or codex")
     .option("--model <slug>", "override model passed to the worker CLI")
     .option("--wait", "wait for settled worker state and read output", false)
-    .option("--timeout <ms>", "wait timeout in milliseconds", (value: string) => Number(value))
+    .option(
+      "--timeout <ms>",
+      "timeout in milliseconds for agent start and --wait",
+      (value: string) => {
+        if (!/^\d+$/.test(value)) throw new Error("--timeout must be a non-negative integer");
+        return Number(value);
+      }
+    )
     .option("--readonly", "disable write tools on the worker CLI", false)
     .option("--direction <direction>", "pane split direction", "right")
     .option("--routes <path>", "routes YAML/JSON path");
@@ -498,9 +518,6 @@ async function main(): Promise<void> {
   }
   if (options.direction !== "right" && options.direction !== "down") {
     throw new Error("--direction must be right or down");
-  }
-  if (options.timeout !== undefined && !Number.isInteger(options.timeout)) {
-    throw new Error("--timeout must be an integer");
   }
   const result = await dispatch(options);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

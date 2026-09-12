@@ -3,16 +3,21 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  agentStatus,
   applyReadonlyPrompt,
   dispatch,
   envFlags,
   inferParentKind,
   loadRoutes,
+  paneId,
+  parseAgentStatus,
   parseRoutes,
   readonlyAgentArgs,
   selectProfileName,
   stableIndex,
+  type CommandResult,
   type DispatchOptions,
+  type HerdrExec,
   type RoutesConfig,
 } from "./herdr-dispatch.ts";
 
@@ -160,5 +165,167 @@ describe("herdr-dispatch contracts", () => {
     await expect(
       dispatch(options, { HERDR_ENV: "1", PSTACK_HERDR_DEPTH: "3" })
     ).rejects.toThrow(/max_depth 3/);
+  });
+
+  test("dispatch refuses a negative timeout before contacting Herdr", async () => {
+    const { calls, exec } = scriptedExec({});
+    await expect(dispatch({ ...options, timeout: -1 }, herdrEnv, exec)).rejects.toThrow(
+      /--timeout must be a non-negative integer/
+    );
+    expect(calls).toEqual([]);
+  });
+});
+
+const splitPayload = {
+  id: "cli:pane:split",
+  result: { pane: { pane_id: "w1:p2" } },
+};
+const getPayload = {
+  id: "cli:agent:get",
+  result: { agent: { agent: "claude", agent_status: "idle", name: "ci-explorer" } },
+};
+
+function jsonResult(payload: unknown): CommandResult {
+  return { stdout: `${JSON.stringify(payload)}\n`, stderr: "", exitCode: 0 };
+}
+
+function textResult(text: string): CommandResult {
+  return { stdout: text, stderr: "", exitCode: 0 };
+}
+
+function failed(stderr: string): CommandResult {
+  return { stdout: "", stderr, exitCode: 1 };
+}
+
+function commandKey(args: string[]): string {
+  return `${args[0]} ${args[1]}`;
+}
+
+function scriptedExec(
+  replies: Record<string, CommandResult | ((args: string[]) => CommandResult)>
+): { calls: string[][]; exec: HerdrExec } {
+  const calls: string[][] = [];
+  return {
+    calls,
+    exec: async (args) => {
+      calls.push(args);
+      const reply = replies[commandKey(args)];
+      if (reply === undefined) throw new Error(`unexpected herdr ${args.join(" ")}`);
+      return typeof reply === "function" ? reply(args) : reply;
+    },
+  };
+}
+
+const herdrEnv = { HERDR_ENV: "1" };
+const splitOk = jsonResult(splitPayload);
+const startOk = jsonResult({ id: "cli:agent:start", result: {} });
+const promptOk = jsonResult({ id: "cli:agent:prompt", result: {} });
+const closeOk = jsonResult({ id: "cli:pane:close", result: {} });
+const getIdle = jsonResult(getPayload);
+const readOk = textResult("worker output\n");
+
+describe("herdr JSON decoders", () => {
+  test("paneId requires result.pane.pane_id", () => {
+    expect(paneId(splitPayload)).toBe("w1:p2");
+    expect(() => paneId({ result: { pane: {} } })).toThrow(/result.pane.pane_id/);
+    expect(() => paneId({ result: {} })).toThrow(/result.pane must be an object/);
+  });
+
+  test("parseAgentStatus accepts only Herdr's five states", () => {
+    expect(parseAgentStatus("idle")).toBe("idle");
+    expect(parseAgentStatus("working")).toBe("working");
+    expect(parseAgentStatus("blocked")).toBe("blocked");
+    expect(parseAgentStatus("done")).toBe("done");
+    expect(parseAgentStatus("unknown")).toBe("unknown");
+    expect(() => parseAgentStatus("ready")).toThrow(/invalid result.agent.agent_status/);
+    expect(() => parseAgentStatus(undefined)).toThrow(/invalid result.agent.agent_status/);
+  });
+
+  test("agentStatus requires result.agent.agent_status and does not guess", () => {
+    expect(agentStatus(getPayload)).toBe("idle");
+    expect(
+      agentStatus({ result: { agent: { agent_status: "unknown" } } })
+    ).toBe("unknown");
+    expect(() =>
+      agentStatus({ result: { agent: { status: "idle" }, status: "idle" } })
+    ).toThrow(/invalid result.agent.agent_status/);
+    expect(() => agentStatus({ result: { status: "idle" } })).toThrow(
+      /result.agent must be an object/
+    );
+  });
+});
+
+describe("herdr-dispatch Herdr sequence", () => {
+  test("passes the same timeout to agent start and prompt --wait", async () => {
+    const { calls, exec } = scriptedExec({
+      "pane split": splitOk,
+      "agent start": startOk,
+      "agent prompt": promptOk,
+      "agent get": getIdle,
+      "agent read": readOk,
+    });
+    const result = await dispatch(
+      { ...options, wait: true, timeout: 45000, readonly: false },
+      herdrEnv,
+      exec
+    );
+    expect(result).toMatchObject({
+      agent: "ci-explorer",
+      pane: "w1:p2",
+      status: "idle",
+      blocked: false,
+      output: "worker output",
+    });
+    const start = calls.find((args) => commandKey(args) === "agent start");
+    const prompt = calls.find((args) => commandKey(args) === "agent prompt");
+    if (!start || !prompt) throw new Error("expected start and prompt");
+    const dash = start.indexOf("--");
+    const timeoutAt = start.indexOf("--timeout");
+    expect(timeoutAt).toBeGreaterThan(-1);
+    expect(start[timeoutAt + 1]).toBe("45000");
+    expect(dash === -1 || timeoutAt < dash).toBe(true);
+    expect(prompt).toContain("--wait");
+    expect(prompt).toContain("45000");
+    expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("closes the pane when agent start fails", async () => {
+    const { calls, exec } = scriptedExec({
+      "pane split": splitOk,
+      "agent start": failed("agent_not_ready"),
+      "pane close": closeOk,
+    });
+    await expect(dispatch(options, herdrEnv, exec)).rejects.toThrow(/agent_not_ready/);
+    expect(calls.map(commandKey)).toEqual(["pane split", "agent start", "pane close"]);
+    expect(calls[2]).toEqual(["pane", "close", "w1:p2"]);
+  });
+
+  test("closes the pane when agent prompt fails", async () => {
+    const { calls, exec } = scriptedExec({
+      "pane split": splitOk,
+      "agent start": startOk,
+      "agent prompt": failed("agent_prompt_stalled"),
+      "pane close": closeOk,
+    });
+    await expect(dispatch(options, herdrEnv, exec)).rejects.toThrow(/agent_prompt_stalled/);
+    expect(calls.map(commandKey)).toEqual([
+      "pane split",
+      "agent start",
+      "agent prompt",
+      "pane close",
+    ]);
+  });
+
+  test("leaves the pane when agent get fails after prompt acceptance", async () => {
+    const { calls, exec } = scriptedExec({
+      "pane split": splitOk,
+      "agent start": startOk,
+      "agent prompt": promptOk,
+      "agent get": failed("agent_not_found"),
+    });
+    await expect(dispatch({ ...options, wait: true }, herdrEnv, exec)).rejects.toThrow(
+      /agent_not_found/
+    );
+    expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
   });
 });

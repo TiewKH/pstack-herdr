@@ -57,7 +57,7 @@ bun <poteto-mode>/scripts/herdr-dispatch.ts \
   --wait
 ```
 
-For parallel fan-out, launch all dispatcher processes before waiting. `blocked` is not completion; inspect the worker's approval/question. `unknown` is not proof of completion.
+`--timeout` / `orchestration.default_timeout_ms` is the same budget for `agent start` and `agent prompt --wait`. For parallel fan-out, launch all dispatcher processes before waiting. `blocked` is not completion; inspect the worker's approval/question. `unknown` is not proof of completion.
 
 ## Migrated delegation paths
 

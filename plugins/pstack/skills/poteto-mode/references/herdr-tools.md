@@ -57,9 +57,11 @@ The caller chooses `--cwd`. Read-only workers may share the current checkout. Co
 
 ## Result handling
 
-With `--wait`, the dispatcher returns JSON containing the Herdr agent name, pane, selected profile, kind, nesting depth, lifecycle status, blocked flag, and recent agent output. `blocked: true` is not completion. Inspect the worker in Herdr and resolve the approval/question deliberately. `unknown` is not proof of completion.
+With `--wait`, the dispatcher returns JSON containing the Herdr agent name, pane, selected profile, kind, nesting depth, lifecycle status, blocked flag, and recent agent output. `blocked: true` is not completion. Inspect the worker in Herdr and resolve the approval/question deliberately. `unknown` is not proof of completion: it is the status Herdr reported, not a missing field.
 
-The dispatcher refuses to run outside `HERDR_ENV=1` and refuses recursive delegation at the configured depth limit.
+`--timeout` and `orchestration.default_timeout_ms` are one budget applied to both `agent start` readiness and `agent prompt --wait`.
+
+The dispatcher refuses to run outside `HERDR_ENV=1` and refuses recursive delegation at the configured depth limit. It owns the pane through prompt acceptance; a start or prompt failure closes that pane.
 
 ## Per-skill notes
 
