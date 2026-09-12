@@ -5,7 +5,7 @@ description: "Use for \"interrogate\", \"adversarial review\", \"multi-model rev
 
 # Interrogate
 
-On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill.
+On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill. When `HERDR_ENV=1`, Herdr takes precedence for delegation: read [the Herdr execution mapping](../poteto-mode/references/herdr-tools.md) and launch reviewers through `scripts/herdr-dispatch.ts --role reviewer` rather than the native Agent/Task/spawn_agent primitive.
 
 Spawn one reviewer per configured model to adversarially review code changes. Each model gets the same prompt and rubric. The adversarial signal comes from model diversity, not assigned personas.
 
@@ -34,20 +34,13 @@ Write one clear paragraph. If you're unsure about the intent, ask the user befor
 
 ## Step 3, Spawn Reviewers
 
-Launch all reviewers in a single message using the `Agent` tool. Use the `interrogate reviewers` list from `~/.claude/pstack-models.md` when present, one reviewer per entry, extending or shrinking the Reviewer A/B/C/D labels below to the configured entry count; otherwise use the table defaults.
+Use the `interrogate reviewers` list from `~/.claude/pstack-models.md` when present, one reviewer per entry, extending or shrinking the Reviewer A/B/C/D labels below to the configured entry count; otherwise use the table defaults.
 
 | Subagent | Default model |
 |----------|---------------|
 | Reviewer A | `claude-opus-5` |
 | Reviewer B | `claude-fable-5` |
 | Reviewer C | `claude-sonnet-5` |
-
-For each reviewer:
-- `subagent_type`: `general-purpose`
-- `model`: the configured `interrogate reviewers` entry, or the table default with no configured line
-- `readonly`: `true`
-
-If a model slug is rejected as unresolvable when you try to spawn the subagent, check the valid slugs in the Agent tool's error message, pick the closest equivalent (prefer the highest-reasoning tier of the same family), spawn with the valid slug, and open a separate PR to update the configured value or default table. Do not block the review on the slug issue. If the configured value is `inherit-parent` or `auto`, omit `model` instead; never treat those aliases as broken slugs or enter this fallback for them.
 
 Read `references/reviewer-prompt.md` and fill in the template with:
 1. The stated intent
@@ -56,6 +49,15 @@ Read `references/reviewer-prompt.md` and fill in the template with:
 4. The code-quality lens from `references/code-quality-review.md`
 
 The same filled template goes to all reviewers, so every model applies the code-quality lens.
+
+When running under Herdr, write that filled prompt to a temporary file and launch one dispatcher process per reviewer. Use unique names and `--role reviewer --readonly --wait`. Start every dispatcher process before waiting so the reviewers actually run concurrently. Routing profiles choose Claude/Codex accounts and models; use `--model` only when deliberately preserving an explicit configured model override.
+
+Outside Herdr, launch all reviewers in a single message using the `Agent` tool. For each reviewer:
+- `subagent_type`: `general-purpose`
+- `model`: the configured `interrogate reviewers` entry, or the table default with no configured line
+- `readonly`: `true`
+
+If a native model slug is rejected as unresolvable, check the valid slugs in the Agent tool's error message, pick the closest equivalent, and continue. If the configured value is `inherit-parent` or `auto`, omit `model`.
 
 ## Step 4, Synthesize
 
@@ -80,10 +82,7 @@ Categorize every finding using these buckets:
 - **Noted**. Technically valid but not actionable. Context-dependent, premature optimization, or low-impact given the current stage.
 - **Dismissed**. Wrong, nitpicky, or missing context. Brief explanation why.
 
-For each finding, include:
-- Which model(s) raised it
-- The category (act on / consider / noted / dismissed)
-- A one-line rationale for the categorization
+For each finding, include which model(s) raised it, the category, and a one-line rationale.
 
 ## Output Format
 
@@ -96,16 +95,16 @@ Present the verdict in this structure:
 - Reviewer [label]: [model name], [N findings] (one bullet per reviewer)
 
 ### Act On
-[Findings that should be addressed. For each: description, which models raised it, why it matters.]
+[Findings that should be addressed.]
 
 ### Consider
-[Findings worth thinking about. For each: description, which models raised it, tradeoff involved.]
+[Findings worth thinking about.]
 
 ### Noted
-[Valid but low-priority. Brief list.]
+[Valid but low-priority.]
 
 ### Dismissed
 [Rejected findings with brief rationale.]
 
 ### Agreement Map
-[Where did models agree, where did they diverge, and what does the pattern of agreement/disagreement tell us?]
+[Where models agreed and diverged, and what that pattern means.]
