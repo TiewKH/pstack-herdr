@@ -464,8 +464,8 @@ export async function dispatch(
   const promptArgs = ["agent", "prompt", options.name, prompt];
   if (options.wait) promptArgs.push("--wait", "--timeout", String(timeout));
   try {
-    await runHerdrJson(startArgs, exec);
-    await runHerdrJson(promptArgs, exec);
+    await runHerdrCommand(startArgs, exec);
+    await runHerdrCommand(promptArgs, exec);
   } catch (error) {
     await closePane(pane, exec);
     throw error;

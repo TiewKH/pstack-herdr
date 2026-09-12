@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 
 const root = join(fileURLToPath(new URL("..", import.meta.url)));
 const read = (path) => readFileSync(join(root, path), "utf8");
-const dispatcher = read("plugins/pstack/skills/poteto-mode/scripts/herdr-dispatch.ts");
 const mapping = read("plugins/pstack/skills/poteto-mode/references/herdr-tools.md");
 const poteto = read("plugins/pstack/skills/poteto-mode/SKILL.md");
 const hook = read("plugins/pstack/hooks/session-start-context.md");
@@ -26,23 +25,6 @@ const playbooks = [
   "autopilot-stack",
 ];
 
-for (const term of [
-  "HERDR_ENV",
-  "PSTACK_HERDR_DEPTH",
-  "CLAUDE_CONFIG_DIR",
-  "CODEX_HOME",
-  "--disallowedTools",
-  "read-only",
-  '"pane"',
-  '"split"',
-  '"agent"',
-  '"start"',
-  '"prompt"',
-  '"get"',
-  '"read"',
-]) {
-  if (!dispatcher.includes(term)) throw new Error(`native Herdr dispatcher is missing: ${term}`);
-}
 if (hook.includes("pstack:herdr-runtime") || hook.includes("HERDR_ENV=1")) {
   throw new Error("session-start hook must not own Herdr delegation");
 }

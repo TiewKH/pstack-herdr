@@ -1,5 +1,3 @@
-version: 1
-
 orchestration:
   max_depth: 3
   # Same budget for `agent start` readiness and `agent prompt --wait`.

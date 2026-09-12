@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -38,6 +38,13 @@ const config: RoutesConfig = {
   },
 };
 
+const emptyRoutesDir = mkdtempSync(join(tmpdir(), "pstack-herdr-empty-routes-"));
+const emptyRoutes = join(emptyRoutesDir, "routes.json");
+writeFileSync(emptyRoutes, "{}\n");
+afterAll(() => {
+  rmSync(emptyRoutesDir, { recursive: true, force: true });
+});
+
 const options: DispatchOptions = {
   role: "explorer",
   name: "ci-explorer",
@@ -47,6 +54,7 @@ const options: DispatchOptions = {
   readonly: true,
   direction: "right",
   kind: "claude",
+  routes: emptyRoutes,
 };
 
 describe("herdr-dispatch routing", () => {
