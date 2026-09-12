@@ -1,176 +1,328 @@
-# pstack for Claude Code, Codex, Prime Agent, opencode, and Gemini CLI
+# pstack-herdr
 
-Claude Code port of [poteto](https://x.com/poteto)'s [pstack](https://github.com/cursor/plugins/tree/main/pstack) plugin. The skill tree is synced against upstream `e8d856f`, pstack v0.14.8 plus the September density pass. See [What's deliberately not ported](#whats-deliberately-not-ported). The same `skills/` tree ships as a Codex plugin and is discovered natively by [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent), [opencode](#opencode), and [Gemini CLI](#gemini-cli). Original by Lauren Tan; ships MIT. Imports seven skills from [cursor-team-kit](https://github.com/cursor/plugins/tree/main/cursor-team-kit) (also MIT): `deslop`, `thermo-nuclear-code-quality-review`, `make-pr-easy-to-review`, `fix-ci`, `fix-merge-conflicts`, `get-pr-comments`, `what-did-i-get-done`.
+Run poteto's pstack workflows through [Herdr](https://herdr.dev), with Claude Code or Codex CLI workers behind one long-lived coordinator.
+
+This fork is for people who want pstack's engineering playbooks without making Cursor the agent runtime. Start one main Claude or Codex session inside Herdr, enter `poteto-mode`, and let pstack route explorers, implementers, reviewers, arena candidates, judges, and verifiers into independent Herdr-managed CLI processes.
 
 > if you want to go fast, go deep first. pstack helps you write less, but higher quality code. rigorous agent workflows you can parallelize with confidence.
 
-This is not a verbatim copy. Skill bodies have been edited so every Cursor-specific primitive resolves to its Claude Code equivalent — see [Differences from upstream](#differences-from-upstream) for the full list. The exhaustive per-skill audit lives in [CHANGES.md](CHANGES.md); license attribution and the upstream pins live in [NOTICE.md](NOTICE.md) and `tools/upstream.json`.
+## Why this fork
 
-## Install
+The upstream ports already make pstack usable outside Cursor. [pstack-claude](https://github.com/michael-denyer/pstack-claude) translates Cursor primitives to Claude Code and Codex. This fork keeps that skill tree and adds Herdr as the orchestration transport.
+
+The split is intentional:
+
+- **pstack decides what work to do.** Playbooks, principles, decomposition, model roles, review, synthesis, and verification stay pstack concerns.
+- **Herdr decides how delegated agents run.** Panes, processes, CLI startup, account profiles, lifecycle state, waiting, blocked workers, and terminal output stay Herdr concerns.
+- **Claude Code and Codex remain the workers.** A Herdr agent is still a real `claude` or `codex` CLI process with its own context window.
+
+There is only one `poteto-mode`, one `arena`, one `how`, one `interrogate`, and one copy of every other pstack workflow. Herdr support is an execution adapter, not a shadow skill tree.
+
+## Architecture
+
+```text
+You
+ │
+ ▼
+Herdr
+ │
+ ▼
+Claude Code or Codex
+MAIN COORDINATOR
+poteto-mode
+ │
+ ├── pstack playbooks and principles
+ ├── role routing
+ └── pstack:herdr-runtime
+       │
+       ├── Claude worker
+       ├── Codex worker
+       ├── Claude reviewer
+       └── Codex verifier
+```
+
+The coordinator stays alive and owns the human-facing result. Workers may recursively delegate when the active pstack workflow requires it. The default Herdr nesting limit is three levels, matching pstack's coordinator, subcoordinator, worker style rather than flattening every workflow into one fan-out.
+
+## What Herdr adds
+
+- One long-lived coordinator with visible worker panes.
+- Claude and Codex workers in the same pstack run.
+- One subscription shared by many workers, or multiple independently authenticated subscriptions.
+- Separate context windows for each worker process.
+- Role-based routing such as `explorer`, `implementation`, `reviewer`, `arena-candidate`, `arena-judge`, and `verifier`.
+- Recursive delegation through Herdr instead of native-only subagents.
+- Worktree isolation for concurrent writers and arena candidates.
+- Explicit handling of `idle`, `done`, `blocked`, and `unknown` agent states.
+
+## Requirements
+
+Install:
+
+- [Herdr](https://herdr.dev)
+- Claude Code and/or Codex CLI
+- Git
+- the official Herdr Agent Skill
+
+Install the release-matched Herdr skill with the method recommended by Herdr. For example:
+
+```shell
+npx skills add herdrdev/herdr --skill herdr -g
+```
+
+The Herdr runtime is activated only inside a Herdr-managed environment where `HERDR_ENV=1`. Outside Herdr, the existing pstack Claude/Codex behavior remains available.
+
+## Install pstack-herdr
 
 ### Claude Code
 
-This repo ships as a Claude Code marketplace containing one plugin (`pstack`).
+This fork retains the Claude Code plugin layout from pstack-claude. Add this repository as the marketplace source and install `pstack`:
 
-```shell
-/plugin marketplace add michael-denyer/pstack-claude
+```text
+/plugin marketplace add TiewKH/pstack-herdr
 /plugin install pstack@pstack-claude
 ```
 
-From 0.9.5 the plugin auto-fires, the same way superpowers does: a `SessionStart` hook (on `startup`, `/clear`, and post-`compact`) injects a ~0.3k-token mandate that routes any non-trivial engineering task into `poteto-mode` before the first response. The full skill still loads only on invoke. Dispatched subagents are told to ignore the mandate, and explicit user instructions take precedence. To opt out, delete `hooks/hooks.json` from the installed copy (`~/.claude/plugins/cache/pstack-claude/pstack/<version>/hooks/hooks.json`); a plugin update restores it.
+Launch Claude Code from a Herdr pane. The SessionStart mandate detects `HERDR_ENV=1`, loads `pstack:herdr-runtime`, and then routes non-trivial engineering work through `pstack:poteto-mode`.
 
-The playbooks keep a todolist using the session's task-tracking tools, with an uncommitted `todo.md` fallback. Claude Code's defaults depend on the model; set `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` to enable the tools. Scope it to one project through the `env` block of that project's `.claude/settings.local.json` when Claude also drives a personal task system. See the [task-tool documentation](https://code.claude.com/docs/en/tools-reference#task-tool-availability) and [poteto-mode's checklist policy](plugins/pstack/skills/poteto-mode/SKILL.md#platform-adaptation).
+### Shared Agent Skills
 
-### Shared Agent Skills install
-
-Codex, Prime Agent, opencode, and Gemini CLI all discover user skills from `~/.agents/skills/`. Clone the repository and link its shared skill tree once:
+Codex and other Agent Skills runtimes can use the shared skill tree:
 
 ```shell
-git clone https://github.com/michael-denyer/pstack-claude
-cd pstack-claude
+git clone https://github.com/TiewKH/pstack-herdr
+cd pstack-herdr
 mkdir -p ~/.agents/skills
 for s in plugins/pstack/skills/*/; do ln -s "$PWD/$s" ~/.agents/skills/"$(basename "$s")"; done
 ```
 
-The loop links all 54 skill directories. 31 are public workflows and 23 `principle-*` directories are internal references used by `poteto-mode`. Each runtime decides whether it understands pstack-specific frontmatter such as `user-invocable: false`, so menu visibility differs. Keep the principle directories installed even when a runtime lists them.
-
-Removing a link from `~/.agents/skills/` removes that skill from every runtime using the shared directory. Teardown is `rm ~/.agents/skills/<name>`.
-
-The [`skills` CLI](https://github.com/vercel-labs/skills) installs the same tree without a clone, resolving `plugins/pstack/skills` as a subtree URL:
+Or install the tree with the skills CLI:
 
 ```shell
-npx skills add https://github.com/michael-denyer/pstack-claude/tree/main/plugins/pstack/skills --skill "*" --agent "*" --yes
+npx skills add https://github.com/TiewKH/pstack-herdr/tree/main/plugins/pstack/skills --skill "*" --agent "*" --yes
 ```
-
-`plugins/pstack/skills` is a supported installation boundary. Everything a skill reads at runtime lives inside it, including the `poteto-agent` and `comment-sicko` definitions under `poteto-mode/references/agents/` and the MIT terms under `poteto-mode/references/licenses/`. Both directories sit inside a skill because the CLI installs skill directories and drops loose files at the tree root. The generator stamps exactly five portable assets from the sources declared in `PORTABLE_ASSETS` and removes stale output from those two generated directories. It rejects missing or escaping local Markdown links and direct instructions to open paths outside the skills tree. The `Skills-only install` CI job copies the tree with the CLI, compares every installed file with the source, and runs the same validation against the installed tree.
-
-Three plugin features do not survive a skills-only install, because they belong to a specific runtime rather than to the skills. Claude Code's `SessionStart` auto-fire lives in `hooks/`, the Codex slash-command stubs live in `.codex-plugin/prompts/`, and Claude Code's native subagent registration reads `agents/`. On a skills-only install, dispatch `comment-sicko` by pointing the runtime's agent primitive at `poteto-mode/references/agents/comment-sicko.md`.
 
 ### Codex
 
-The same plugin carries a `.codex-plugin/plugin.json` manifest and a root `.agents/plugins/marketplace.json`. Use the [shared Agent Skills install](#shared-agent-skills-install). This path is verified on a live Codex session.
+Codex uses the same `skills/` tree. For native Codex multi-agent operation outside Herdr, `multi_agent = true` remains supported. Inside Herdr, pstack delegation is routed through `pstack:herdr-runtime`, so workers can be Claude, Codex, or a mixture selected by the routing configuration.
 
-Codex discovers the linked skills and namespaces them under the plugin, so they list as `pstack:poteto-mode`, `pstack:tdd`, and so on. The namespace comes from `plugins/pstack/.codex-plugin/plugin.json` and resolves through the flat symlinks, even though each linked skill sits one directory below that manifest (verified on a live session via this symlink install). To enable the multi-model and parallel-subagent skills (`interrogate`, `arena`, `how`, `why`, `reflect`, `architect`), turn on subagents in `~/.codex/config.toml`:
-
-```toml
-[features]
-multi_agent = true
-```
-
-For slash-command shortcuts (`/poteto-mode`, `/tdd`, and the rest), link the command files into Codex's prompts directory:
+For Codex slash-command shortcuts, link the generated prompt stubs:
 
 ```shell
 mkdir -p ~/.codex/prompts
 for c in plugins/pstack/.codex-plugin/prompts/*.md; do ln -s "$PWD/$c" ~/.codex/prompts/"$(basename "$c")"; done
 ```
 
-Each command invokes its skill, so `/tdd` runs the `tdd` skill. Installing the full plugin through the Codex marketplace (the root `.agents/plugins/marketplace.json`) carries skills and commands together. The skill links plus prompt links are the verified local path. Teardown for a prompt is `rm ~/.codex/prompts/<name>.md`.
+## Quick start
 
-### Prime Agent
+Start Herdr, open a pane for the coordinator, then run Claude Code or Codex there. For example:
 
-[Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) discovers skills from `~/.agents/skills/` and from `.agents/skills/` in the working tree up to the git root ([docs](https://github.com/PrimeIntellect-ai/prime-agent/blob/main/packages/coding-agent/docs/skills.md)). The [shared Agent Skills install](#shared-agent-skills-install) is the complete Prime install.
+```text
+herdr
+  └── claude
+       └── /poteto-mode implement this feature
+```
 
-pstack's `SKILL.md` frontmatter is a subset of what Prime reads: it requires `name` (lowercase, matching the parent directory — every pstack skill already conforms) and `description`, honours `disable-model-invocation`, and ignores unknown keys such as pstack's `user-invocable`. `curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh` installs Prime itself; `--no-skills` disables discovery, and explicit `--skill <path>` still loads. Prime is model-agnostic, so running these skills against **ChatGPT / OpenAI models is a Prime backend setting, not a plugin change** — keep the multi-model panels in `arena`, `interrogate`, `architect`, and `how` genuinely diverse across whatever models you configure (see the OpenAI panel note under [Running on Codex](#running-on-codex)).
+The coordinator can then choose a pstack playbook and spawn the required Herdr workers. A typical feature run may use Codex explorers, an isolated implementation worker, independent Claude/Codex reviewers, and a verifier while the root Claude session remains the coordinator.
 
-Unverified relative to Codex: the Prime path is derived from Prime's documented discovery paths and frontmatter schema, not yet run on a live Prime session. Prime has no plugin-hook runtime, so the Claude Code auto-fire hook does not apply. Enter `pstack:poteto-mode` by name or add a standing routing instruction to your Prime config.
+## One subscription is enough
 
-### opencode
+You do not need multiple subscriptions to use pstack-herdr. Multiple Herdr agents can use the same authenticated Claude or Codex profile:
 
-[opencode](https://opencode.ai/docs/skills) loads Agent Skills from `~/.agents/skills/` as well as its own `~/.config/opencode/skills/` directory. Use the [shared Agent Skills install](#shared-agent-skills-install). There is nothing to generate.
+```yaml
+profiles:
+  claude-main:
+    kind: claude
+    model: inherit
+    env:
+      CLAUDE_CONFIG_DIR: ~/.claude
 
-opencode ignores the pstack-specific `user-invocable: false` key, so its picker lists the 23 `principle-*` leaves alongside the 31 public workflows. Codex and Claude Code hide the leaves. Keep them linked because `poteto-mode` cites them by name and expects to read each one.
+roles:
+  explorer:
+    pool: [claude-main]
+  implementation:
+    pool: [claude-main]
+  reviewer:
+    pool: [claude-main]
+  verifier:
+    pool: [claude-main]
+```
 
-The opencode path is verified on a live opencode 1.18.25 session. It discovers all 31 public skills through the links and reads a linked `SKILL.md` on request. Agents, commands, and permissions are configured in `opencode.json`.
+Each worker is a separate process and context window, but all workers using that profile share the provider account's usage, rate, and concurrency limits.
 
-### Gemini CLI
+## Multiple subscriptions
 
-[Gemini CLI](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/using-agent-skills.md) has native Agent Skills. It discovers user skills from `~/.gemini/skills/` or the `~/.agents/skills/` compatibility alias. Use the [shared Agent Skills install](#shared-agent-skills-install), then run `/skills list` to inspect discovery or `/skills reload` after changing a linked file. Ask Gemini to use `poteto-mode`; its `activate_skill` tool loads the skill and its resources.
+Multiple subscriptions are optional. They are useful when you intentionally maintain separately authenticated Claude or Codex accounts and want pstack to distribute roles across them.
 
-The Gemini path follows published Gemini CLI documentation and has not been run on a live session. Neither Gemini CLI nor opencode gets generated command files. Native discovery keeps each `SKILL.md`, its references, and its scripts attached to one installed directory, so the skills work from the repository where the user actually needs them.
+Use separate CLI config homes:
 
-Discovery is not a promise that Claude-specific execution details translate automatically. The skill bodies retain Claude Code tool names, `claude-*` model slugs, and Claude built-in skills. [`codex-tools.md`](plugins/pstack/skills/poteto-mode/references/codex-tools.md) maps those names on Codex only. Gemini CLI, opencode, and Prime Agent must use their own tool, model, and configuration equivalents. Delegation-heavy and multi-model workflows remain unverified on those runtimes. None has a plugin-hook equivalent of the Claude Code auto-fire hook, so ask the runtime to use `poteto-mode` explicitly.
+```text
+~/.claude-main
+~/.claude-a
+~/.claude-b
+~/.codex-a
+~/.codex-b
+```
 
-## Layout
+Then route roles in `~/.config/pstack-herdr/routes.yaml`:
+
+```yaml
+version: 1
+
+orchestration:
+  max_depth: 3
+  default_timeout_ms: 180000
+
+profiles:
+  claude-main:
+    kind: claude
+    model: inherit
+    env:
+      CLAUDE_CONFIG_DIR: ~/.claude-main
+
+  claude-a:
+    kind: claude
+    model: inherit
+    env:
+      CLAUDE_CONFIG_DIR: ~/.claude-a
+
+  codex-a:
+    kind: codex
+    model: inherit
+    env:
+      CODEX_HOME: ~/.codex-a
+
+roles:
+  explorer:
+    strategy: round-robin
+    pool: [codex-a, claude-a]
+
+  implementation:
+    strategy: first-available
+    pool: [codex-a, claude-a]
+
+  judgment:
+    strategy: strongest-first
+    pool: [claude-main, claude-a]
+
+  reviewer:
+    strategy: round-robin
+    pool: [claude-a, codex-a]
+
+  arena-candidate:
+    strategy: spread
+    pool: [claude-a, codex-a]
+
+  arena-judge:
+    strategy: strongest-first
+    pool: [claude-main]
+
+  verifier:
+    strategy: first-available
+    pool: [codex-a, claude-a]
+```
+
+Authenticate each profile using the vendor CLI. Do not copy authentication tokens, cookies, or session files between profiles.
+
+A complete example lives at [`config/routes.example.yaml`](config/routes.example.yaml).
+
+## Recursive delegation
+
+Original pstack does not require every worker to be a leaf. Some workflows deliberately use coordinators that spawn workers and verifiers. pstack-herdr preserves that behavior.
+
+```text
+root coordinator
+ │
+ ├── worker
+ ├── verifier
+ └── subcoordinator
+      │
+      ├── worker
+      └── verifier
+```
+
+`PSTACK_HERDR_DEPTH` tracks nesting. The default maximum is `3`. Workers only create descendants when the active pstack workflow requires delegation or pstack's context-window discipline calls for it. Judges and verifiers are leaves by default.
+
+## Parallel writers and worktrees
+
+Read-only exploration can share a checkout. Parallel writers cannot.
+
+- Read-only explorers and reviewers may share the coordinator's checkout.
+- One writer may share it only when no concurrent writer exists and the playbook permits it.
+- Two or more concurrent writers use separate git worktrees or separate writable output paths.
+- Arena candidates always receive isolated writable worktrees or output directories.
+- Verifiers are read-only by default.
+
+The runtime consults the installed Herdr worktree commands instead of baking version-sensitive Herdr CLI syntax into pstack.
+
+## Herdr lifecycle
+
+The official Herdr skill is the authority for exact CLI syntax and lifecycle semantics. pstack-herdr deliberately does not duplicate that documentation.
+
+The runtime distinguishes:
+
+- `idle` and `done`, which are settled states;
+- `blocked`, which means the agent is waiting for an approval or question;
+- `unknown`, which is not proof that the worker finished.
+
+Blocked or stalled workers are inspected before any prompt is resent. The coordinator owns every child result and independently verifies the resulting artifact before reporting success.
+
+See [`HERDR.md`](HERDR.md) for the runtime-specific guide.
+
+## Runtime mapping
+
+At a high level:
+
+| pstack action | Herdr execution |
+| --- | --- |
+| create a subagent | create/select a pane, then start a Herdr coding agent |
+| send delegated work | prompt the Herdr agent |
+| fan out N workers | start N independent panes/agents before waiting |
+| wait for completion | use Herdr agent lifecycle waiting |
+| inspect output | read the Herdr agent stream |
+| inspect a blocked worker | inspect agent state and recent output |
+| isolate a writer | create/use a dedicated worktree and start the pane there |
+
+The installed Herdr skill and binary remain authoritative for the concrete commands.
+
+## Project layout
 
 ```text
 .
-├── .github/workflows/               # CI and security checks
-├── .claude-plugin/marketplace.json   # Claude Code marketplace manifest (repo root)
-├── .agents/plugins/marketplace.json  # Codex marketplace manifest (repo root)
-├── plugins/pstack/                   # the plugin itself
-│   ├── .claude-plugin/plugin.json    # Claude Code manifest
-│   ├── .codex-plugin/plugin.json     # Codex manifest (skills: ./skills/)
-│   ├── skills/                       # 54 Agent Skills (shared by all five runtimes; the skills-only install boundary)
-│   │   ├── poteto-mode/references/licenses/  # generated license texts and skills-scoped notice
-│   │   ├── poteto-mode/references/codex-tools.md  # Claude→Codex tool/model/skill map
-│   │   ├── poteto-mode/references/agents/  # generated copies of agents/, for runtimes that install only skills
-│   │   └── poteto-mode/scripts/      # vendored bun/bash tooling: watch-pr, orch, worktree-audit.sh
-│   ├── .codex-plugin/prompts/        # 31 slash command stubs, generated (Codex only; link into ~/.codex/prompts)
-│   ├── hooks/                        # SessionStart auto-fire: injects the poteto-mode mandate (Claude Code only)
-│   └── agents/                       # Claude subagents: poteto-agent, comment-sicko (Codex routes via codex-tools.md)
-├── tests/skill-collision-repro.sh    # behavioral slash-menu check (needs claude CLI)
-├── tests/agent-skills.test.mjs       # shared metadata, portable assets, path checks, and Codex prompt boundary
-├── tools/generate.mjs                # stamps versioned, model, prompt, README, and portable-asset copies
-├── tools/validate-skills.mjs         # rejects missing/escaping links and instructions to open unreachable paths
-├── tools/sync.mjs                    # syncs a component to a new upstream SHA, applying substitutions.json
-├── tools/upstream.json               # upstream remote, per-component pinned SHAs, and excluded upstream paths
-├── tools/substitutions.json          # mechanical Cursor→Claude rewrites + the denylist of manual-only Cursor-isms
-├── VERSION                           # canonical plugin version (single source; manifests are stamped)
-├── LICENSE                           # pstack upstream MIT
-├── LICENSE-cursor-team-kit           # cursor-team-kit upstream MIT
-├── CONTRIBUTING.md                   # sync boundary, local checks, release rules
-├── NOTICE.md                         # attribution table
-├── CHANGES.md                        # per-skill substitution audit
-└── README.md                         # this file
+├── config/
+│   └── routes.example.yaml           # Herdr profile and role routing example
+├── plugins/pstack/
+│   ├── skills/
+│   │   ├── herdr-runtime/            # internal Herdr execution adapter
+│   │   ├── poteto-mode/              # canonical pstack entry point
+│   │   └── ...                       # upstream-derived pstack skills
+│   ├── hooks/                        # SessionStart routing for Claude Code
+│   ├── agents/                       # Claude-native agents for non-Herdr use
+│   └── .codex-plugin/                # Codex manifest and generated prompts
+├── tests/
+│   └── herdr-runtime.test.mjs        # Herdr integration contract tests
+├── HERDR.md                          # Herdr-specific usage guide
+├── NOTICE-HERDR.md                   # Herdr Apache-2.0 attribution
+├── NOTICE.md                         # upstream attribution
+└── README.md
 ```
 
-Plugin-internal path references in the docs below (`skills/<name>/`, `.codex-plugin/prompts/<name>.md`) are relative to `plugins/pstack/`.
+## Upstream pstack-claude compatibility
 
-## Running on Codex
+pstack-herdr is a fork of [Michael Denyer's pstack-claude](https://github.com/michael-denyer/pstack-claude). The fork intentionally preserves the upstream skill/playbook structure so future pstack-claude changes can be synchronized without maintaining a second Herdr-specific copy of every workflow.
 
-The Codex and Claude Code builds use the same `skills/` tree. Codex-specific generation adds prompt stubs from each public skill's row in the slash-command table below. The shared generator also stamps manifest versions, model-policy sections, and five portable assets. One mapping file handles the Claude-to-Codex translation, the same structure `superpowers` uses for Codex. pstack diverges in one respect. superpowers writes its skills in tool-neutral language, so no skill names a runtime tool. pstack keeps the upstream Claude-native instructions and adds a platform-mapping reference to each affected skill. Both direct skill invocation and the optional Codex prompt stubs reach that mapping.
+Outside `HERDR_ENV=1`, the existing Claude Code and Codex runtime adaptations remain the baseline. The upstream Codex mapping continues to live in [`plugins/pstack/skills/poteto-mode/references/codex-tools.md`](plugins/pstack/skills/poteto-mode/references/codex-tools.md). Herdr adds a transport layer rather than replacing that portability work.
 
-- **Skill invocation.** Codex loads `SKILL.md` natively. There is no `Skill` tool. You invoke a skill by name (ask for it, or pick `pstack:poteto-mode` from the list).
-- **Commands.** The 31 `.codex-plugin/prompts/*.md` files are Codex-only, generated by `tools/generate.mjs` from each public skill's row in this README's slash-command table (edit the row, rerun the generator; hand edits to a stub are overwritten). Codex reads their `description` frontmatter and the filename, ignores the keys it doesn't know, and each body invokes its skill. Link them into `~/.codex/prompts/` for `/name` shortcuts (see [Install on Codex](#codex)). Claude Code ships no `commands/` directory: it renders both commands and user-invocable skills in the slash menu, so a trampoline paired with its skill duplicated every `/pstack:<name>` row (see CHANGES 0.9.13). The skill alone serves the slash command there.
-- **Tool, model, and skill mapping.** When a skill names a Claude tool (the `Agent` tool, `AskUserQuestion`), a `claude-*` model slug, or a driver or bundled skill, it resolves through [`skills/poteto-mode/references/codex-tools.md`](plugins/pstack/skills/poteto-mode/references/codex-tools.md). `poteto-mode`'s Platform Adaptation section, affected skill entry points, and every generated Codex stub point there; skill-specific mappings sit in its Per-skill notes table.
-- **Subagents.** The `Agent` tool maps to Codex `spawn_agent` / `wait_agent` / `close_agent`, enabled by `multi_agent = true`. Parallel fan-out is multiple `spawn_agent` calls in one turn. Without the flag, `interrogate`, `arena`, `how`, `why`, `reflect`, and `architect` degrade to a single sequential pass. There is no `poteto-agent` subagent type on Codex; route ad-hoc subagents by dispatching a `spawn_agent` told to read `poteto-mode` first.
-- **Auto-fire.** The `hooks/` SessionStart injection is Claude Code-only; Codex has no plugin hook runtime. Enter `pstack:poteto-mode` by name, or add a standing instruction to `~/.codex/AGENTS.md` if you want the same always-on routing.
-- **Models.** The `claude-*` slugs in skills are Claude defaults, stamped into each skill's Models section from `plugins/pstack/models.json`. On Codex substitute your configured Codex models, keeping multi-model panels genuinely diverse. `/setup-pstack` writes `~/.codex/pstack-models.md` (referenced from `~/.codex/AGENTS.md`) with Codex slugs instead of `~/.claude/pstack-models.md`.
+The shared Agent Skills tree remains usable by Prime Agent, opencode, Gemini CLI, and other compatible runtimes. Herdr-specific delegation is only selected when the session is actually Herdr-managed.
 
-Verified on a live Codex session installed via the symlinks: the user-facing skills are discovered and namespaced under `pstack` (`pstack:poteto-mode`, `pstack:interrogate`, and so on). The `principle-*` leaf skills carry `user-invocable: false` and no command, so Codex does not surface them in the picker, the same as Claude Code. They stay installed for `poteto-mode` to read by path. The deeper behaviors (mapping resolution mid-task, `spawn_agent` fan-out) follow the proven `superpowers` pattern and are worth confirming in your own session.
+## Dependencies inherited from pstack-claude
 
-## CI
+The upstream port references Claude Code's bundled `run` and `loop` skills, GitHub CLI for PR workflows, Bun for the vendored orchestration tooling, and optional tools such as Graphite, `jq`, and `rg` for specific playbooks. Skill-authoring routes use Anthropic's `plugin-dev:skill-development` skill when available.
 
-`ci.yml` and `security.yml` run on every pull request and push to `main`. `ci.yml` regenerates and diffs the generator's outputs, runs the Bun tests, installs the skills tree through the `skills` CLI and compares the copy with the source, typechecks and tests the vendored Bun tooling, and lints shell scripts, workflows, Markdown, and relative links. `security.yml` runs `osv-scanner` over the lockfiles and `zizmor` over the workflows, weekly as well as per PR. [CONTRIBUTING.md](CONTRIBUTING.md#things-that-will-fail-ci) lists what each gate rejects and how to run it locally.
-
-Dependabot keeps the pinned action SHAs current, on a 7-day cooldown so a compromised release has time to be reported before a PR opens. The vendored scripts' `commander` pin follows upstream through `tools/sync.mjs`.
-
-Before a release, run `tests/skill-collision-repro.sh` locally to exercise the behavioral check CI cannot.
-
-## Dependencies
-
-Nothing is declared in `plugin.json`. Install the one companion plugin yourself:
-
-- **`plugin-dev`** (from the `claude-plugins-official` marketplace) — the rewiring routes skill-authoring tasks (in `automate-me`, `reflect`, `poteto-mode`) to the `plugin-dev:skill-development` skill:
-
-  ```shell
-  /plugin marketplace add anthropics/claude-plugins-official
-  /plugin install plugin-dev@claude-plugins-official
-  ```
-
-  Until 0.9.2 this was a `dependencies` entry in `plugin.json`. The desktop app's `--plugin-dir` load mode can never resolve cross-marketplace dependencies and hard-disables the whole plugin, so 0.9.3 removed the declaration — full mechanism in the 0.9.3 entry of [CHANGES.md](CHANGES.md). Without `plugin-dev` installed, only the skill-authoring routes degrade; everything else works.
-
-Not declared as deps, but referenced in skill bodies:
-
-- **`run`, `loop`** are bundled Claude Code skills. App verification uses the [driver policy](plugins/pstack/skills/poteto-mode/SKILL.md#non-negotiables). `/create-verification-skill` records a project driver at `.claude/skills/verify/`; [Claude Code 2.1.200 or later](https://code.claude.com/docs/en/skills#run-and-verify-your-app) lets it replace the bundled `/verify`.
-- **`gh` CLI** — system-level requirement of the `babysit` skill and the Babysit / Shipping playbooks. Install via [`brew install gh`](https://cli.github.com) and authenticate with `gh auth login`.
-- **`bun`** — runs the vendored `skills/poteto-mode/scripts/` tooling (`watch-pr`, `orch`). Install via [`brew install oven-sh/bun/bun`](https://bun.sh). Only the playbooks that call those scripts need it; `bootstrap.ts` installs the script dependencies on first run.
-- **`gt` (Graphite CLI)** — only for the Orchestrate playbook and the `orch` script's stack frontier. Since the v0.14.8 sync, Shipping and the autopilots stack with plain `gh` (or Origin's CLI when present) and never require `gt`.
-- **`jq` and `rg` (ripgrep)** — only for `scripts/worktree-audit.sh` (the Worktree cleanup playbook). Without them the audit still runs but blanks its PR and LAST_CHAT columns, so it warns on stderr rather than returning a table that looks complete.
-
-No third-party plugins. The harsher-critique escape hatch lives in the bundled `thermo-nuclear-code-quality-review` skill (imported from cursor-team-kit), not in an external plugin.
+Those dependencies and the upstream portability machinery are retained. Herdr is an additional runtime dependency only when you want Herdr-backed orchestration.
 
 ## Slash commands
+
+The public pstack workflows remain the same:
 
 | command | use it when |
 | --- | --- |
@@ -206,84 +358,30 @@ No third-party plugins. The harsher-critique escape hatch lives in the bundled `
 | `/get-pr-comments` | fetch and summarize review comments from the active PR |
 | `/what-did-i-get-done` | summarize authored commits over a user-chosen period |
 
-## Subagents
+## Attribution and lineage
 
-`poteto-agent` ships unchanged. Spawn from a parent with `subagent_type: "poteto-agent"`.
+This repository stands on three projects. Their work should remain visible when this fork is redistributed or modified.
 
-`comment-sicko` is the read-only comment reviewer the `no-comments` skill spawns. Upstream names it `Comment Sicko`; the port renames it to `comment-sicko` so the name is a valid `subagent_type`. Invoke it through `/no-comments`, not directly.
+**pstack.** The original pstack engineering workflows and Poteto Mode were created by [Lauren Tan (poteto)](https://x.com/poteto) and published in [cursor/plugins](https://github.com/cursor/plugins/tree/main/pstack) under the MIT License.
 
-## Differences from upstream
+**pstack-claude.** [Michael Denyer](https://github.com/michael-denyer) authored and maintains [pstack-claude](https://github.com/michael-denyer/pstack-claude), the Claude Code/Codex portability work this repository forks. That project also preserves notices for imported `cursor-team-kit` components from Cursor.
 
-The port is editorial, not mechanical. Anywhere upstream pstack assumed Cursor-specific primitives, this port substitutes the Claude Code equivalent so refs actually resolve. Two prior ports ([v1truv1us/ai-eng-system](https://github.com/v1truv1us/ai-eng-system), [Evan-Kim2028/agent-fleet](https://github.com/Evan-Kim2028/agent-fleet)) stop at namespacing — they vendor pstack under `pstack/` and leave the Cursor refs intact. This port does the content surgery.
+**Herdr.** [herdrdev](https://github.com/herdrdev/herdr) maintains Herdr and the official Herdr Agent Skill. Herdr is licensed under Apache License 2.0. This repository uses Herdr as a runtime and does not claim authorship of Herdr itself.
 
-### What's added
+pstack-herdr is an independent fork. It is not an official project of Lauren Tan, Michael Denyer, Cursor, Anthropic, OpenAI, or herdrdev.
 
-- **`skills/babysit/`** — Claude Code analog of Cursor's closed-source `/babysit` built-in. Wraps `gh pr view` / `gh pr checks` / `gh run view --log-failed` plus the `loop` skill for pacing. Independently authored; workflow informed by Cursor's public `/babysit` behavior — not a copy of Cursor's implementation. Since the v0.14.2 sync, poteto-mode routes PR-status requests to the ported `playbooks/babysit.md` instead, and this skill is the standalone `/babysit` entry point.
-- **`skills/deslop/`** — imported verbatim from `cursor-team-kit`. Cleans AI tells out of diffs before commit.
-- **`skills/thermo-nuclear-code-quality-review/`** — imported verbatim from `cursor-team-kit`. Used as the harsher-critique escape hatch in `arena`, `interrogate`, `architect`, and `how` (replaces the Cursor-original cross-vendor bridge).
-- **`skills/make-pr-easy-to-review/`** — imported verbatim from `cursor-team-kit`. Composes with `opening-a-pr` and `babysit`.
-- **`skills/fix-ci/`** — imported verbatim from `cursor-team-kit`. Narrower CI-fix primitive that `babysit` can route to.
-- **`skills/fix-merge-conflicts/`** — imported verbatim from `cursor-team-kit`. Pairs with `babysit` step 5.
-- **`skills/get-pr-comments/`** — imported verbatim from `cursor-team-kit`. Primitive for `babysit` step 4 and `reflect`.
-- **`skills/what-did-i-get-done/`** — imported verbatim from `cursor-team-kit`. Commit summary over a chosen period.
+See [`NOTICE.md`](NOTICE.md), [`NOTICE-skills.md`](NOTICE-skills.md), [`NOTICE-HERDR.md`](NOTICE-HERDR.md), [`LICENSE`](LICENSE), and [`LICENSE-cursor-team-kit`](LICENSE-cursor-team-kit) for the preserved notices and license boundaries.
 
-### What's substituted in skill bodies
+## Upstream synchronization
 
-| Upstream (Cursor) | This port (Claude Code) |
-| --- | --- |
-| `Task` tool, `subagent_type: generalPurpose`, `readonly: false/true` | `Agent` tool, `subagent_type: "general-purpose"`, no readonly flag (subagent_type controls MCP access) |
-| `AskQuestion` tool | `AskUserQuestion` tool |
-| Cursor's built-in `/loop` | Claude Code's built-in `loop` skill |
-| Cursor's built-in `/babysit` | `babysit` skill bundled in this plugin. From v0.14.0 upstream routes PR-status requests inside poteto-mode to `playbooks/babysit.md` instead; the port does the same, and `/babysit` stays the standalone entry point |
-| Cursor's built-in `/create-skill` | `plugin-dev:skill-development` skill |
-| `cursor-team-kit` `control-cli` (CLI/TUI driver) | Claude Code's `run` skill |
-| `cursor-team-kit` `control-ui` (browser/Electron driver) | The [driver policy](plugins/pstack/skills/poteto-mode/SKILL.md#non-negotiables) |
-| Transcripts at `~/.cursor/projects/*/` or `agent-transcripts/` | `~/.claude/projects/<encoded-cwd>/*.jsonl` (where `<encoded-cwd>` is the workspace cwd with `/` → `-`) |
-| Skill paths `.cursor/skills/`, `~/.cursor/plugins/` | `.claude/skills/`, `~/.claude/plugins/` |
-| MCP discovery via Cursor's `mcps/` directory | Tool list at top of system prompt (`mcp__<server>__<name>` entries), or `.mcp.json`, or `claude mcp list` |
-| Cursor cloud agents (`environment: "cloud"`, `cloud_base_branch`) | Local background subagents (`run_in_background: true`), isolated by git worktree |
-| Cursor's `/goal` (standing objective across turns) | The program objective written into the run's standing orders and restated in the todolist |
-| The Cursor agent store (path in the system prompt) | `~/.claude/orchestrate/<project-slug>/`, which survives the session restarts a multi-day program expects |
-| Model rule `~/.cursor/rules/pstack-models.mdc` | Override sheet `~/.claude/pstack-models.md`, included from `CLAUDE.md` |
-| Model `composer-2.5-fast` (Cursor) | `claude-sonnet-4-6` |
-| Model `claude-opus-4-X-thinking-xhigh` (Cursor UI variant) | `claude-opus-5` (extended thinking configured separately) |
-| Models `gpt-5.3-codex-high-fast`, `gpt-5.5-high-fast` (via Cursor) | `claude-sonnet-4-6`, `claude-haiku-4-5` (Claude family) |
-| Multi-model panels (arena, architect, interrogate) | Default panel is `claude-opus-5` + `claude-fable-5` + `claude-sonnet-5` — three distinct models across three tiers (replaces the cross-vendor diversity lost in translation). |
+The fork keeps pstack-claude's synchronization machinery under `tools/`. When upstream pstack or pstack-claude changes, prefer a focused sync/rebase that preserves the Herdr adapter as a small runtime-specific layer.
 
-### What's lost in translation
+The design rule is simple: do not rewrite upstream playbooks merely to mention Herdr. Put transport behavior in `herdr-runtime`; change a shared skill only when the semantic contract truly needs to know about the runtime.
 
-**Cross-vendor model diversity.** `arena`, `interrogate`, `architect`, and `how` all rely on stress-testing a design against several *different* model families. Claude Code is single-vendor, so the split collapses to three Claude variants by tier. Instead of bridging to an external CLI for that diversity, the rewiring routes the "harsher pass" to the bundled `thermo-nuclear-code-quality-review` skill — different style of pressure (strict maintainability rubric), not vendor diversity, but it lives in-plugin with no extra installs.
+## Status
 
-### What's deliberately kept
-
-- The `poteto-agent` subagent ID and all references to it.
-- `run_in_background: true` on Agent calls (Claude Code supports it).
-- `/loop`, `/deslop`, `/babysit` slash references in skill bodies — they all resolve in Claude Code now.
-- The principle/playbook structure and every word of the principles themselves.
-
-### What's deliberately not ported
-
-Each path below is listed under `exclude` for the `pstack` component in `tools/upstream.json`, so `tools/sync.mjs` skips it on every sync instead of failing on its Cursor-isms.
-
-- **`automations/benny/`** (upstream `0452e08`, the only pstack change between `e46364b` and v0.10.0) — a dormant Slack issue-triage and reproduce-and-fix automation pack built on Cursor's event-triggered automations. It registers no slash skills even upstream, so excluding it changes nothing about the ported plugin's behavior. Porting it would mean translating Cursor's event-trigger runtime to Claude Code's polling-based scheduled agents plus Slack and tracker plumbing — speculative infrastructure with no local user. Revisit if an unattended issue-intake stream materialises; the likely first step is porting the triage skill onto a single Claude scheduled agent, not the whole pack.
-- **`docs/guide/`** (upstream `02c03a9`, `0b7ef5b`, `424829e`) — the ten-chapter usage tutorial and its six screenshots (2.3 MB). It teaches pstack through Cursor's UI, sticky mode, and cloud agents, so a faithful port would be a rewrite rather than a sync, and none of it ships as skill content. Read it upstream at [cursor/plugins/pstack/docs/guide](https://github.com/cursor/plugins/tree/main/pstack/docs/guide); the concepts map through the substitution table above. Revisit if the port grows its own tutorial.
-- **Sticky mode** (upstream `#144`) — Cursor-only `mode`/`icon`/`color`/`reminder` frontmatter with no Claude Code equivalent. The port's 0.9.5 SessionStart hook is the analog and already carries the non-trivial / trivial / opt-out logic.
-- **`is_background: true` on `poteto-agent`** (upstream `99559f2`) — Cursor subagent frontmatter. Claude Code's agent frontmatter has no such key, and `run_in_background: true` on the spawning `Agent` call already covers it.
-- **`skills/make-bot-ui/`** (upstream `799151d`, `6fecddb`) — builds a page that wakes a Grok Bot over a webhook routine created with Cursor's `update_state` tool and exposed on Tailscale. Every step is Cursor-runtime plumbing with no Claude Code counterpart, the same category as Benny.
-- **`assets/logo.png`** (upstream `efa2a53`, `7314f72`) — the Cursor marketplace logo. Claude Code plugin manifests carry no logo field.
-- **`disable-model-invocation: true` on `how`, `why`, `unslop`, `typescript-best-practices`** (upstream `73f8be4`) — on Claude Code that flag makes the Skill tool refuse the invocation outright, which breaks the SessionStart mandate. The 0.9.8 invariant in `tools/generate.mjs` rejects it on every skill.
-- **Fable 5.1 slug defaults** (upstream `23a56e2`) — model defaults live in `plugins/pstack/models.json` and are stamped by the generator, so upstream's slug bumps are never copied into skill prose.
-- **`cursor-team-kit` beyond the seven imported skills** covers app verification (`verify-this`, `control-cli`, `control-ui`), handled by the [driver policy](plugins/pstack/skills/poteto-mode/SKILL.md#non-negotiables); compiler diagnostics (`check-compiler-errors`), handled by LSP; or workflows already covered by `babysit`, `fix-ci`, `make-pr-easy-to-review`, and `what-did-i-get-done`. `pr-review-canvas` is Cursor-UI-specific.
-
-### Forking note
-
-Editing skill bodies forks this from upstream. Re-syncing to a future pstack release means re-applying the substitution table. The full re-port recipe is in [CHANGES.md](CHANGES.md).
+The Herdr integration is under active validation. Static CI covers the runtime contract, routing configuration, and skill-tree invariants. Live Claude/Codex execution with authenticated Herdr profiles should be treated as the final acceptance test before relying on the fork for unattended or long-running orchestration.
 
 ## License
 
-MIT. Three upstream LICENSE files are preserved:
-
-- [LICENSE](LICENSE) — pstack (Lauren Tan)
-- [LICENSE-cursor-team-kit](LICENSE-cursor-team-kit) — Cursor (covers the `deslop` and `thermo-nuclear-code-quality-review` skills)
-
-[NOTICE-skills.md](NOTICE-skills.md) is the scoped notice copied into skills-only installations. The root [NOTICE.md](NOTICE.md) covers the full plugin, including runtime-specific files.
+The pstack-derived code remains under its preserved MIT terms. Imported cursor-team-kit components retain their MIT terms. Herdr itself and its official skill are Apache-2.0 and are referenced, not relicensed by this repository. See the notice files above for the exact boundaries.
