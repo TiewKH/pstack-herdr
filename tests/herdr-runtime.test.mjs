@@ -97,6 +97,9 @@ if (routes.includes("workspace:") || routes.includes("round-robin") || routes.in
 if (!setup.includes("If `HERDR_ENV=1`, follow **Herdr setup**")) {
   throw new Error("setup-pstack does not branch on Herdr runtime");
 }
+if (!setup.includes("configure-herdr.ts") || !setup.includes("Do not write YAML yourself.")) {
+  throw new Error("setup-pstack does not delegate Herdr config writes to the deterministic script");
+}
 if (!setup.includes("~/.config/pstack-herdr/routes.yaml")) {
   throw new Error("setup-pstack does not configure the Herdr route file");
 }
