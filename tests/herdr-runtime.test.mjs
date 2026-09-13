@@ -46,7 +46,7 @@ if (!mapping.includes("| `how` |") || !mapping.includes("| Feature / bug-fix")) 
   throw new Error("Herdr mapping is missing per-skill notes");
 }
 for (const skill of ["automate-me", "maintain-verification-skill", "show-me-your-work", "recall", "no-comments"]) {
-  if (!mapping.includes(`| `${skill}` |`)) {
+  if (!mapping.includes("| `" + skill + "` |")) {
     throw new Error(`Herdr mapping is missing delegated skill note: ${skill}`);
   }
 }
