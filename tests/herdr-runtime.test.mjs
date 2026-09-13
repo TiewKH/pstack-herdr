@@ -97,7 +97,7 @@ for (const role of [
   "verifier",
   "subcoordinator",
 ]) {
-  if (!setup.includes(``\`${role}\```)) {
+  if (!setup.includes("`" + role + "`")) {
     throw new Error(`setup-pstack Herdr setup is missing role: ${role}`);
   }
 }
