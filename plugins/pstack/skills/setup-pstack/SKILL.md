@@ -58,7 +58,7 @@ Prefer capable/cheap profiles for `explorer` and `verifier`, stronger profiles f
 
 ### 3. Write the setup input JSON
 
-Create a temporary JSON file shaped exactly like this:
+Create a temporary JSON file shaped exactly like this (a committed copy lives at `config/setup.example.json`):
 
 ```json
 {

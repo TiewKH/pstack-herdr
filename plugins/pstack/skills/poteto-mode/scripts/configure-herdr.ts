@@ -43,9 +43,9 @@ async function main(): Promise<void> {
   }
 
   if (options.check) {
-    const current = renderRoutesYaml(existing);
+    const current = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "";
     if (current !== yaml) {
-      throw new Error("routes file is valid but does not match the requested setup input");
+      throw new Error("routes file does not match the requested setup input");
     }
     process.stdout.write("routes are valid and current\n");
     return;

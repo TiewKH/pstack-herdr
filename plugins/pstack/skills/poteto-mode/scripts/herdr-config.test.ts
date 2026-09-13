@@ -104,4 +104,57 @@ describe("herdr deterministic setup", () => {
     const config = buildRoutes({}, parseSetupInput(JSON.stringify(setup)));
     expect(parseRoutes(renderRoutesYaml(config))).toEqual(config);
   });
+
+  test("committed setup example is valid input", () => {
+    const example = readFileSync(
+      join(import.meta.dir, "../../../../../config/setup.example.json"),
+      "utf8"
+    );
+    const config = buildRoutes({}, parseSetupInput(example));
+    expect(parseRoutes(renderRoutesYaml(config))).toEqual(config);
+  });
+
+  test("--check compares disk bytes to the writer output", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pstack-herdr-check-"));
+    dirs.push(dir);
+    const inputPath = join(dir, "setup.json");
+    const outputPath = join(dir, "routes.yaml");
+    writeFileSync(inputPath, JSON.stringify(setup));
+    const yaml = renderRoutesYaml(buildRoutes({}, parseSetupInput(JSON.stringify(setup))));
+    writeFileSync(outputPath, yaml);
+
+    const current = await runConfigure(["--input", inputPath, "--output", outputPath, "--check"]);
+    expect(current.exitCode).toBe(0);
+    expect(current.stdout).toContain("routes are valid and current");
+
+    writeFileSync(outputPath, yaml.replaceAll(/    model: .*\n/g, ""));
+    const stale = await runConfigure(["--input", inputPath, "--output", outputPath, "--check"]);
+    expect(stale.exitCode).not.toBe(0);
+    expect(stale.stderr).toMatch(/does not match the requested setup input/);
+
+    const missing = await runConfigure([
+      "--input",
+      inputPath,
+      "--output",
+      join(dir, "missing.yaml"),
+      "--check",
+    ]);
+    expect(missing.exitCode).not.toBe(0);
+  });
 });
+
+async function runConfigure(
+  args: string[]
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  const proc = Bun.spawn(["bun", join(import.meta.dir, "configure-herdr.ts"), ...args], {
+    cwd: import.meta.dir,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  return { stdout, stderr, exitCode };
+}

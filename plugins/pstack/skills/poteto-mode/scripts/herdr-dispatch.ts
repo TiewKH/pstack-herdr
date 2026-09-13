@@ -3,9 +3,13 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ensureDependenciesInstalled } from "./bootstrap.ts";
-import { expandHome, loadRoutes, type AgentKind, type Profile, type RouteStrategy, type RoutesConfig } from "./herdr-config.ts";
-export { loadRoutes, parseRoutes } from "./herdr-config.ts";
-export type { AgentKind, Profile, RouteStrategy, RoutesConfig } from "./herdr-config.ts";
+import {
+  expandHome,
+  loadRoutes,
+  type AgentKind,
+  type Profile,
+  type RoutesConfig,
+} from "./herdr-config.ts";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 

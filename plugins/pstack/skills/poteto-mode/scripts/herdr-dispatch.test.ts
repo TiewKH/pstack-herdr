@@ -2,23 +2,21 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { loadRoutes, parseRoutes, type RoutesConfig } from "./herdr-config.ts";
 import {
   agentStatus,
   applyReadonlyPrompt,
   dispatch,
   envFlags,
   inferParentKind,
-  loadRoutes,
   paneId,
   parseAgentStatus,
-  parseRoutes,
   readonlyAgentArgs,
   selectProfileName,
   stableIndex,
   type CommandResult,
   type DispatchOptions,
   type HerdrExec,
-  type RoutesConfig,
 } from "./herdr-dispatch.ts";
 
 const config: RoutesConfig = {

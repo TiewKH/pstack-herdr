@@ -98,6 +98,19 @@ function parseStrategy(value: unknown, label: string): RouteStrategy {
   throw new Error(`${label} must be spread or first`);
 }
 
+function configHomeEnvKey(kind: AgentKind): "CLAUDE_CONFIG_DIR" | "CODEX_HOME" {
+  switch (kind) {
+    case "claude":
+      return "CLAUDE_CONFIG_DIR";
+    case "codex":
+      return "CODEX_HOME";
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`unhandled agent kind: ${String(exhaustive)}`);
+    }
+  }
+}
+
 function parseEnvMap(raw: unknown, label: string): Record<string, string> {
   const entries = asObject(raw, label);
   const env: Record<string, string> = {};
@@ -110,19 +123,64 @@ function parseEnvMap(raw: unknown, label: string): Record<string, string> {
   return env;
 }
 
+function parseProfile(raw: unknown, label: string): Profile {
+  const profile = asObject(raw, label);
+  const parsed: Profile = { kind: parseAgentKind(profile.kind, `${label}.kind`) };
+  const model = optionalString(profile.model, `${label}.model`);
+  if (model) parsed.model = model;
+  if (profile.env !== undefined) parsed.env = parseEnvMap(profile.env, `${label}.env`);
+  return parsed;
+}
+
+function parseOrchestration(
+  raw: unknown,
+  label: string
+): { max_depth?: number; default_timeout_ms?: number } {
+  const orchestration = asObject(raw, label);
+  return {
+    max_depth: optionalNonNegativeInt(orchestration.max_depth, `${label}.max_depth`),
+    default_timeout_ms: optionalNonNegativeInt(
+      orchestration.default_timeout_ms,
+      `${label}.default_timeout_ms`
+    ),
+  };
+}
+
+function parseNonEmptyStrings(value: unknown, label: string): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some((item) => typeof item !== "string" || item.length === 0)
+  ) {
+    throw new Error(`${label} must be a non-empty array of strings`);
+  }
+  return [...value];
+}
+
+function parseRoleRoute(
+  raw: unknown,
+  label: string,
+  hasProfile: (name: string) => boolean
+): RoleRoute {
+  const role = asObject(raw, label);
+  const profiles = parseNonEmptyStrings(role.profiles, `${label}.profiles`);
+  for (const profileName of profiles) {
+    if (!hasProfile(profileName)) {
+      throw new Error(`${label} references unknown profile ${profileName}`);
+    }
+  }
+  return {
+    profiles,
+    strategy: parseStrategy(role.strategy, `${label}.strategy`),
+  };
+}
+
 export function validateRoutes(raw: unknown): RoutesConfig {
   const root = asObject(raw, "routes");
   const config: RoutesConfig = {};
 
   if (root.orchestration !== undefined) {
-    const orchestration = asObject(root.orchestration, "orchestration");
-    config.orchestration = {
-      max_depth: optionalNonNegativeInt(orchestration.max_depth, "orchestration.max_depth"),
-      default_timeout_ms: optionalNonNegativeInt(
-        orchestration.default_timeout_ms,
-        "orchestration.default_timeout_ms"
-      ),
-    };
+    config.orchestration = parseOrchestration(root.orchestration, "orchestration");
   }
 
   if (root.profiles !== undefined) {
@@ -132,12 +190,7 @@ export function validateRoutes(raw: unknown): RoutesConfig {
       if (!PROFILE_NAME.test(name)) {
         throw new Error(`profiles.${name} name must match ${PROFILE_NAME.source}`);
       }
-      const profile = asObject(profileRaw, `profiles.${name}`);
-      const parsed: Profile = { kind: parseAgentKind(profile.kind, `profiles.${name}.kind`) };
-      const model = optionalString(profile.model, `profiles.${name}.model`);
-      if (model) parsed.model = model;
-      if (profile.env !== undefined) parsed.env = parseEnvMap(profile.env, `profiles.${name}.env`);
-      profiles[name] = parsed;
+      profiles[name] = parseProfile(profileRaw, `profiles.${name}`);
     }
     config.profiles = profiles;
   }
@@ -146,24 +199,9 @@ export function validateRoutes(raw: unknown): RoutesConfig {
     const rolesRaw = asObject(root.roles, "roles");
     const roles: Record<string, RoleRoute> = {};
     for (const [name, roleRaw] of Object.entries(rolesRaw)) {
-      const role = asObject(roleRaw, `roles.${name}`);
-      if (
-        !Array.isArray(role.profiles) ||
-        role.profiles.length === 0 ||
-        role.profiles.some((item) => typeof item !== "string" || item.length === 0)
-      ) {
-        throw new Error(`roles.${name}.profiles must be a non-empty array of strings`);
-      }
-      const profiles = role.profiles as string[];
-      for (const profileName of profiles) {
-        if (!config.profiles?.[profileName]) {
-          throw new Error(`roles.${name} references unknown profile ${profileName}`);
-        }
-      }
-      roles[name] = {
-        profiles,
-        strategy: parseStrategy(role.strategy, `roles.${name}.strategy`),
-      };
+      roles[name] = parseRoleRoute(roleRaw, `roles.${name}`, (profileName) =>
+        Boolean(config.profiles?.[profileName])
+      );
     }
     config.roles = roles;
   }
@@ -205,83 +243,16 @@ export function loadRoutes(
   return parseRoutes(readFileSync(resolved, "utf8"));
 }
 
-function validateSetupInput(raw: unknown): SetupInput {
-  const root = asObject(raw, "setup input");
-  if (!Array.isArray(root.profiles) || root.profiles.length === 0) {
-    throw new Error("setup input.profiles must be a non-empty array");
+function setupProfileToRoute(profile: SetupProfileInput): Profile {
+  const env = { ...profile.env };
+  if (profile.config_home) {
+    env[configHomeEnvKey(profile.kind)] = profile.config_home;
   }
-
-  const seen = new Set<string>();
-  const profiles: SetupProfileInput[] = root.profiles.map((item, index) => {
-    const profile = asObject(item, `setup input.profiles[${index}]`);
-    const name = optionalString(profile.name, `setup input.profiles[${index}].name`);
-    if (!name || !PROFILE_NAME.test(name)) {
-      throw new Error(`setup input.profiles[${index}].name must match ${PROFILE_NAME.source}`);
-    }
-    if (seen.has(name)) throw new Error(`duplicate setup profile: ${name}`);
-    seen.add(name);
-
-    const parsed: SetupProfileInput = {
-      name,
-      kind: parseAgentKind(profile.kind, `setup input.profiles[${index}].kind`),
-    };
-    const model = optionalString(profile.model, `setup input.profiles[${index}].model`);
-    if (model) parsed.model = model;
-    const configHome = optionalString(
-      profile.config_home,
-      `setup input.profiles[${index}].config_home`
-    );
-    if (configHome) {
-      if (/[\r\n]/.test(configHome)) {
-        throw new Error(`setup input.profiles[${index}].config_home contains a newline`);
-      }
-      parsed.config_home = configHome;
-    }
-    if (profile.env !== undefined) {
-      parsed.env = parseEnvMap(profile.env, `setup input.profiles[${index}].env`);
-    }
-    return parsed;
-  });
-
-  const rolesRaw = asObject(root.roles, "setup input.roles");
-  const roles: Record<string, RoleRoute> = {};
-  for (const [roleName, roleRaw] of Object.entries(rolesRaw)) {
-    const role = asObject(roleRaw, `setup input.roles.${roleName}`);
-    if (
-      !Array.isArray(role.profiles) ||
-      role.profiles.length === 0 ||
-      role.profiles.some((item) => typeof item !== "string" || item.length === 0)
-    ) {
-      throw new Error(`setup input.roles.${roleName}.profiles must be a non-empty array of strings`);
-    }
-    for (const profileName of role.profiles as string[]) {
-      if (!seen.has(profileName)) {
-        throw new Error(`setup input.roles.${roleName} references unknown profile ${profileName}`);
-      }
-    }
-    roles[roleName] = {
-      profiles: [...(role.profiles as string[])],
-      strategy: parseStrategy(role.strategy, `setup input.roles.${roleName}.strategy`),
-    };
-  }
-
-  for (const role of REQUIRED_HERDR_ROLES) {
-    if (!roles[role]) throw new Error(`setup input.roles is missing required role: ${role}`);
-  }
-
-  let orchestration: SetupInput["orchestration"];
-  if (root.orchestration !== undefined) {
-    const value = asObject(root.orchestration, "setup input.orchestration");
-    orchestration = {
-      max_depth: optionalNonNegativeInt(value.max_depth, "setup input.orchestration.max_depth"),
-      default_timeout_ms: optionalNonNegativeInt(
-        value.default_timeout_ms,
-        "setup input.orchestration.default_timeout_ms"
-      ),
-    };
-  }
-
-  return { profiles, roles, orchestration };
+  return {
+    kind: profile.kind,
+    ...(profile.model ? { model: profile.model } : {}),
+    ...(Object.keys(env).length > 0 ? { env } : {}),
+  };
 }
 
 export function parseSetupInput(text: string): SetupInput {
@@ -291,11 +262,56 @@ export function parseSetupInput(text: string): SetupInput {
   } catch (error) {
     throw new Error("setup input must be valid JSON", { cause: error });
   }
-  return validateSetupInput(raw);
+
+  const root = asObject(raw, "setup input");
+  if (!Array.isArray(root.profiles) || root.profiles.length === 0) {
+    throw new Error("setup input.profiles must be a non-empty array");
+  }
+
+  const seen = new Set<string>();
+  const profiles: SetupProfileInput[] = root.profiles.map((item, index) => {
+    const label = `setup input.profiles[${index}]`;
+    const profile = asObject(item, label);
+    const name = optionalString(profile.name, `${label}.name`);
+    if (!name || !PROFILE_NAME.test(name)) {
+      throw new Error(`${label}.name must match ${PROFILE_NAME.source}`);
+    }
+    if (seen.has(name)) throw new Error(`duplicate setup profile: ${name}`);
+    seen.add(name);
+
+    const parsed = parseProfile(profile, label);
+    const configHome = optionalString(profile.config_home, `${label}.config_home`);
+    if (configHome && /[\r\n]/.test(configHome)) {
+      throw new Error(`${label}.config_home contains a newline`);
+    }
+
+    const setupProfile: SetupProfileInput = { name, kind: parsed.kind };
+    if (parsed.model) setupProfile.model = parsed.model;
+    if (configHome) setupProfile.config_home = configHome;
+    if (parsed.env) setupProfile.env = parsed.env;
+    return setupProfile;
+  });
+
+  const profileMap: Record<string, Profile> = {};
+  for (const profile of profiles) {
+    profileMap[profile.name] = setupProfileToRoute(profile);
+  }
+
+  const routes = validateRoutes({
+    orchestration: root.orchestration,
+    profiles: profileMap,
+    roles: asObject(root.roles, "setup input.roles"),
+  });
+
+  const roles = routes.roles ?? {};
+  for (const role of REQUIRED_HERDR_ROLES) {
+    if (!roles[role]) throw new Error(`setup input.roles is missing required role: ${role}`);
+  }
+
+  return { profiles, roles, orchestration: routes.orchestration };
 }
 
-export function buildRoutes(existing: RoutesConfig, rawInput: SetupInput): RoutesConfig {
-  const input = validateSetupInput(rawInput);
+export function buildRoutes(existing: RoutesConfig, input: SetupInput): RoutesConfig {
   const profiles: Record<string, Profile> = {};
 
   for (const item of [...input.profiles].sort((a, b) => a.name.localeCompare(b.name))) {
@@ -303,11 +319,7 @@ export function buildRoutes(existing: RoutesConfig, rawInput: SetupInput): Route
     const env: Record<string, string> = { ...oldEnv };
     delete env.CLAUDE_CONFIG_DIR;
     delete env.CODEX_HOME;
-    Object.assign(env, item.env ?? {});
-
-    if (item.config_home) {
-      env[item.kind === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME"] = item.config_home;
-    }
+    Object.assign(env, setupProfileToRoute(item).env ?? {});
 
     profiles[item.name] = {
       kind: item.kind,
@@ -316,23 +328,17 @@ export function buildRoutes(existing: RoutesConfig, rawInput: SetupInput): Route
     };
   }
 
-  const orchestration = {
-    max_depth:
-      input.orchestration?.max_depth ??
-      existing.orchestration?.max_depth ??
-      3,
-    default_timeout_ms:
-      input.orchestration?.default_timeout_ms ??
-      existing.orchestration?.default_timeout_ms ??
-      180000,
-  };
-
-  const config: RoutesConfig = {
-    orchestration,
+  return {
+    orchestration: {
+      max_depth: input.orchestration?.max_depth ?? existing.orchestration?.max_depth ?? 3,
+      default_timeout_ms:
+        input.orchestration?.default_timeout_ms ??
+        existing.orchestration?.default_timeout_ms ??
+        180000,
+    },
     profiles,
     roles: input.roles,
   };
-  return validateRoutes(config);
 }
 
 function quote(value: string): string {
@@ -348,9 +354,10 @@ function orderedRoleNames(roles: Record<string, RoleRoute>): string[] {
 }
 
 export function renderRoutesYaml(config: RoutesConfig): string {
-  const parsed = validateRoutes(config);
   const lines: string[] = [];
-  const orchestration = parsed.orchestration ?? {};
+  const orchestration = config.orchestration ?? {};
+  const profiles = config.profiles ?? {};
+  const roles = config.roles ?? {};
 
   lines.push("orchestration:");
   if (orchestration.max_depth !== undefined) {
@@ -361,8 +368,8 @@ export function renderRoutesYaml(config: RoutesConfig): string {
   }
 
   lines.push("", "profiles:");
-  for (const name of Object.keys(parsed.profiles ?? {}).sort()) {
-    const profile = parsed.profiles![name];
+  for (const name of Object.keys(profiles).sort()) {
+    const profile = profiles[name];
     lines.push(`  ${name}:`, `    kind: ${profile.kind}`);
     if (profile.model !== undefined) lines.push(`    model: ${quote(profile.model)}`);
     const env = profile.env ?? {};
@@ -375,8 +382,8 @@ export function renderRoutesYaml(config: RoutesConfig): string {
   }
 
   lines.push("", "roles:");
-  for (const name of orderedRoleNames(parsed.roles ?? {})) {
-    const role = parsed.roles![name];
+  for (const name of orderedRoleNames(roles)) {
+    const role = roles[name];
     lines.push(
       `  ${name}:`,
       `    profiles: [${role.profiles.map(quote).join(", ")}]`,
