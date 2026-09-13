@@ -35,14 +35,14 @@ async function main(): Promise<void> {
   const outputPath = expandHome(options.output);
   const existing = existsSync(outputPath) ? loadRoutes(options.output) : {};
   const next = buildRoutes(existing, input);
-  const yaml = renderRoutesYaml(next);
 
   if (options.dryRun) {
-    process.stdout.write(yaml);
+    process.stdout.write(renderRoutesYaml(next));
     return;
   }
 
   if (options.check) {
+    const yaml = renderRoutesYaml(next);
     const current = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "";
     if (current !== yaml) {
       throw new Error("routes file does not match the requested setup input");

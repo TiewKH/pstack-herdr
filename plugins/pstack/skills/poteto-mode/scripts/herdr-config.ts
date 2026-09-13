@@ -41,6 +41,12 @@ export const REQUIRED_HERDR_ROLES = [
   "subcoordinator",
 ] as const;
 
+export interface SetupRoutes {
+  orchestration?: RoutesConfig["orchestration"];
+  profiles: Record<string, Profile>;
+  roles: Record<string, RoleRoute>;
+}
+
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
@@ -229,10 +235,10 @@ export function loadRoutes(
   return parseRoutes(readFileSync(resolved, "utf8"));
 }
 
-function foldSetupProfile(
+function takeSetupProfile(
   raw: unknown,
   label: string
-): { name: string; profile: Record<string, unknown> } {
+): { name: string; configHome?: string; profile: Record<string, unknown> } {
   const item = asObject(raw, label);
   const name = optionalString(item.name, `${label}.name`);
   if (!name || !PROFILE_NAME.test(name)) {
@@ -241,25 +247,35 @@ function foldSetupProfile(
 
   const profile: Record<string, unknown> = { ...item };
   delete profile.name;
-  const configHome = profile.config_home;
+  const configHomeRaw = profile.config_home;
   delete profile.config_home;
-  if (configHome === undefined) return { name, profile };
-
-  const home = optionalString(configHome, `${label}.config_home`);
-  const kind = profile.kind;
-  if (kind !== "claude" && kind !== "codex") return { name, profile };
-
-  const key = configHomeEnvKey(kind);
-  const env = profile.env;
-  if (env === undefined) {
-    profile.env = { [key]: home };
-  } else if (typeof env === "object" && env !== null && !Array.isArray(env)) {
-    profile.env = { ...env, [key]: home };
+  const configHome =
+    configHomeRaw === undefined
+      ? undefined
+      : optionalString(configHomeRaw, `${label}.config_home`);
+  if (configHome && /[\r\n]/.test(configHome)) {
+    throw new Error(`${label}.config_home contains a newline`);
   }
-  return { name, profile };
+  return { name, configHome, profile };
 }
 
-export function parseSetupInput(text: string): RoutesConfig {
+function applyConfigHomes(
+  profiles: Record<string, Profile>,
+  homes: Map<string, string>
+): Record<string, Profile> {
+  if (homes.size === 0) return profiles;
+  const next: Record<string, Profile> = { ...profiles };
+  for (const [name, home] of homes) {
+    const profile = next[name];
+    next[name] = {
+      ...profile,
+      env: { ...profile.env, [configHomeEnvKey(profile.kind)]: home },
+    };
+  }
+  return next;
+}
+
+export function parseSetupInput(text: string): SetupRoutes {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -273,11 +289,16 @@ export function parseSetupInput(text: string): RoutesConfig {
   }
 
   const seen = new Set<string>();
+  const homes = new Map<string, string>();
   const profiles: Record<string, unknown> = {};
   root.profiles.forEach((item, index) => {
-    const { name, profile } = foldSetupProfile(item, `setup input.profiles[${index}]`);
+    const { name, configHome, profile } = takeSetupProfile(
+      item,
+      `setup input.profiles[${index}]`
+    );
     if (seen.has(name)) throw new Error(`duplicate setup profile: ${name}`);
     seen.add(name);
+    if (configHome) homes.set(name, configHome);
     profiles[name] = profile;
   });
 
@@ -287,20 +308,26 @@ export function parseSetupInput(text: string): RoutesConfig {
     roles: asObject(root.roles, "setup input.roles"),
   });
 
-  const roles = routes.roles ?? {};
+  const parsedProfiles = routes.profiles;
+  const roles = routes.roles;
+  if (!parsedProfiles) throw new Error("setup input.profiles must be a non-empty array");
+  if (!roles) throw new Error("setup input.roles must be an object");
   for (const role of REQUIRED_HERDR_ROLES) {
     if (!roles[role]) throw new Error(`setup input.roles is missing required role: ${role}`);
   }
 
-  return routes;
+  return {
+    orchestration: routes.orchestration,
+    profiles: applyConfigHomes(parsedProfiles, homes),
+    roles,
+  };
 }
 
-export function buildRoutes(existing: RoutesConfig, input: RoutesConfig): RoutesConfig {
-  const incoming = input.profiles ?? {};
+export function buildRoutes(existing: RoutesConfig, input: SetupRoutes): RoutesConfig {
   const profiles: Record<string, Profile> = {};
 
-  for (const name of Object.keys(incoming).sort()) {
-    const item = incoming[name];
+  for (const name of Object.keys(input.profiles).sort()) {
+    const item = input.profiles[name];
     const oldEnv = existing.profiles?.[name]?.env ?? {};
     const env: Record<string, string> = { ...oldEnv };
     delete env.CLAUDE_CONFIG_DIR;
@@ -323,7 +350,7 @@ export function buildRoutes(existing: RoutesConfig, input: RoutesConfig): Routes
         180000,
     },
     profiles,
-    roles: input.roles ?? {},
+    roles: input.roles,
   };
 }
 
