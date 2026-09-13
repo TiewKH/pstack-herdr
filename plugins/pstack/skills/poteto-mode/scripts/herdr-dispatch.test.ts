@@ -9,6 +9,7 @@ import {
   dispatch,
   envFlags,
   inferParentKind,
+  isPaneNotReady,
   paneId,
   parseAgentStatus,
   readonlyAgentArgs,
@@ -293,6 +294,39 @@ describe("herdr-dispatch Herdr sequence", () => {
     expect(prompt).toContain("--wait");
     expect(prompt).toContain("45000");
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("retries agent start while the fresh pane has no shell prompt yet", async () => {
+    let attempts = 0;
+    const { calls, exec } = scriptedExec({
+      "pane split": splitOk,
+      "agent start": () => {
+        attempts += 1;
+        return attempts < 3
+          ? failed(
+              '{"error":{"code":"agent_pane_busy","message":"agent target pane w1:p2 is not an available shell"}}'
+            )
+          : startOk;
+      },
+      "agent prompt": promptOk,
+    });
+    await dispatch(options, herdrEnv, exec);
+    expect(attempts).toBe(3);
+    expect(calls.map(commandKey)).toEqual([
+      "pane split",
+      "agent start",
+      "agent start",
+      "agent start",
+      "agent prompt",
+    ]);
+    expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("only a pane that is not yet a shell is worth retrying", () => {
+    expect(isPaneNotReady('{"error":{"code":"agent_pane_busy"}}')).toBe(true);
+    expect(isPaneNotReady("agent target pane w1:p2 is not an available shell")).toBe(true);
+    expect(isPaneNotReady("agent_not_ready")).toBe(false);
+    expect(isPaneNotReady("agent_prompt_stalled")).toBe(false);
   });
 
   test("closes the pane when agent start fails", async () => {

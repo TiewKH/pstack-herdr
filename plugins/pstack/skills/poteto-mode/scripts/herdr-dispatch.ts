@@ -55,6 +55,12 @@ export type HerdrExec = (args: string[]) => Promise<CommandResult>;
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+// A freshly split pane needs a moment to reach its interactive shell prompt, and
+// `herdr agent start` rejects the pane until it does. Herdr's own readiness wait
+// defaults to 30s, so give the shell the same budget.
+const SHELL_READY_TIMEOUT_MS = 30000;
+const SHELL_READY_POLL_MS = 250;
+const PANE_NOT_READY = /agent_pane_busy|not an available shell/;
 const READONLY_PREFIX =
   "Read-only worker. Do not write files, commit, or mutate the workspace.\n\n";
 
@@ -273,6 +279,28 @@ function chooseProfile(
   return { name: "parent", profile: { kind, model: options.model ?? "inherit", env: {} } };
 }
 
+export function isPaneNotReady(message: string): boolean {
+  return PANE_NOT_READY.test(message);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((done) => setTimeout(done, ms));
+}
+
+async function startAgent(args: string[], exec: HerdrExec): Promise<void> {
+  const deadline = Date.now() + SHELL_READY_TIMEOUT_MS;
+  for (;;) {
+    try {
+      await runHerdrCommand(args, exec);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!isPaneNotReady(message) || Date.now() >= deadline) throw error;
+      await sleep(SHELL_READY_POLL_MS);
+    }
+  }
+}
+
 async function closePane(pane: string, exec: HerdrExec): Promise<void> {
   try {
     await runHerdrCommand(["pane", "close", pane], exec);
@@ -328,7 +356,7 @@ export async function dispatch(
   const promptArgs = ["agent", "prompt", options.name, prompt];
   if (options.wait) promptArgs.push("--wait", "--timeout", String(timeout));
   try {
-    await runHerdrCommand(startArgs, exec);
+    await startAgent(startArgs, exec);
     await runHerdrCommand(promptArgs, exec);
   } catch (error) {
     await closePane(pane, exec);
