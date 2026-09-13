@@ -14,142 +14,125 @@ Do not configure both layers unless the user explicitly wants native fallback be
 
 ## Herdr setup
 
-Write `~/.config/pstack-herdr/routes.yaml`. This is the effective model-routing layer for delegated pstack work when `HERDR_ENV=1`.
+Herdr-backed delegation reads `~/.config/pstack-herdr/routes.yaml`. Do not hand-author that file. The deterministic writer is:
 
-A Herdr profile represents a worker runtime plus optional model and runtime-specific config home:
+```bash
+bun ../poteto-mode/scripts/configure-herdr.ts --input <setup.json>
+```
 
-- Claude Code: `kind: claude`, with an optional `CLAUDE_CONFIG_DIR`.
-- Codex: `kind: codex`, with an optional `CODEX_HOME`.
-- `model: inherit` or `model: auto` means do not force a model flag.
-- An explicit model slug is passed to that worker CLI with `--model`.
-
-Multiple profiles may share the same config home. This is how one Claude or Codex subscription can run multiple workers or multiple model choices without inventing separate accounts.
+The setup skill owns discovery and user choices. The script owns validation, canonical serialization, preservation rules, atomic writes, and idempotency.
 
 ### 1. Detect worker runtimes and models
 
-Determine which worker CLIs are available for Herdr to launch: Claude Code, Codex, or both. Enumerate only model slugs that are confirmed usable by the corresponding CLI/session. Never write an explicit model slug that has not been confirmed.
+Determine which worker CLIs are available for Herdr to launch: Claude Code, Codex, or both. Enumerate only model slugs confirmed usable by the corresponding CLI/session.
 
-If the user has additional authenticated CLI homes, ask for their paths. Do not copy, move, or inspect credential material. Treat each user-provided config home as an opaque authenticated profile.
+If the user has additional authenticated CLI homes, ask for their paths. Do not copy, move, or inspect credentials. Treat each config home as an opaque authenticated profile.
 
-If only one authenticated config home exists, that is sufficient for multiple concurrent workers; they share that provider account's concurrency, rate, and usage limits.
+Multiple profiles may share the same config home. This is how one Claude or Codex subscription can provide multiple worker/model profiles; those workers share that account's concurrency, rate, and usage limits.
 
-### 2. Load current Herdr state
+### 2. Collect the routing choices
 
-If `~/.config/pstack-herdr/routes.yaml` exists, read it and treat its profiles, orchestration settings, and role pools as the current choices.
+Collect profiles with:
 
-Otherwise start from the repository's `config/routes.example.yaml` shape:
+- a stable profile `name`,
+- `kind`: `claude` or `codex`,
+- optional `model` (use `inherit` when no model should be forced),
+- optional `config_home`,
+- optional extra `env` entries.
 
-```yaml
-orchestration:
-  max_depth: 3
-  default_timeout_ms: 180000
+Collect all nine required semantic roles:
 
-profiles: {}
-roles: {}
+- `explorer`
+- `implementation`
+- `difficult-implementation`
+- `judgment`
+- `reviewer`
+- `arena-candidate`
+- `arena-judge`
+- `verifier`
+- `subcoordinator`
+
+Each role has a non-empty `profiles` array and `strategy` of `first` or `spread`.
+
+Prefer capable/cheap profiles for `explorer` and `verifier`, stronger profiles for `difficult-implementation`, `judgment`, `arena-judge`, and `subcoordinator`, and diverse pools for `reviewer` and `arena-candidate` when more than one runtime/model is available.
+
+### 3. Write the setup input JSON
+
+Create a temporary JSON file shaped exactly like this:
+
+```json
+{
+  "profiles": [
+    {
+      "name": "claude-strong",
+      "kind": "claude",
+      "model": "<confirmed-strong-model>",
+      "config_home": "~/.claude"
+    },
+    {
+      "name": "claude-fast",
+      "kind": "claude",
+      "model": "<confirmed-fast-model>",
+      "config_home": "~/.claude"
+    }
+  ],
+  "roles": {
+    "explorer": { "profiles": ["claude-fast"], "strategy": "first" },
+    "implementation": { "profiles": ["claude-fast"], "strategy": "first" },
+    "difficult-implementation": { "profiles": ["claude-strong"], "strategy": "first" },
+    "judgment": { "profiles": ["claude-strong"], "strategy": "first" },
+    "reviewer": { "profiles": ["claude-strong", "claude-fast"], "strategy": "spread" },
+    "arena-candidate": { "profiles": ["claude-strong", "claude-fast"], "strategy": "spread" },
+    "arena-judge": { "profiles": ["claude-strong"], "strategy": "first" },
+    "verifier": { "profiles": ["claude-fast"], "strategy": "first" },
+    "subcoordinator": { "profiles": ["claude-strong"], "strategy": "first" }
+  }
+}
 ```
 
-Preserve existing `orchestration` values unless the user asks to change them. Preserve profile `env` entries you do not own.
+Only include `orchestration` when the user explicitly changes it:
 
-### 3. Define profiles
-
-Create or reuse named profiles for each runtime/config-home/model combination the user wants available.
-
-For example, one Claude subscription may expose two model-routing profiles that share the same config home:
-
-```yaml
-profiles:
-  claude-strong:
-    kind: claude
-    model: <confirmed-strong-model>
-    env:
-      CLAUDE_CONFIG_DIR: ~/.claude
-
-  claude-fast:
-    kind: claude
-    model: <confirmed-fast-model>
-    env:
-      CLAUDE_CONFIG_DIR: ~/.claude
+```json
+{
+  "orchestration": {
+    "max_depth": 3,
+    "default_timeout_ms": 180000
+  }
+}
 ```
 
-Do not imply that separate profile names mean separate subscriptions. Separate subscriptions/accounts require independently authenticated config homes.
+Do not write YAML yourself.
 
-### 4. Map semantic Herdr roles
+### 4. Preview, then apply
 
-Configure all Herdr roles used by pstack:
+Preview the exact canonical YAML first:
 
-- `explorer` — read-only investigation and reconnaissance.
-- `implementation` — normal implementation work.
-- `difficult-implementation` — harder algorithms, concurrency, or cross-cutting implementation.
-- `judgment` — synthesis, trade-offs, and decision support.
-- `reviewer` — independent review.
-- `arena-candidate` — competing implementation/solution candidates.
-- `arena-judge` — evaluation of Arena candidates.
-- `verifier` — testing and validation.
-- `subcoordinator` — delegated coordination that may spawn its own children.
-
-Each role has a profile pool and a strategy:
-
-- `first` — always choose the first profile.
-- `spread` — deterministically distribute worker names across the pool.
-
-Prefer capable/cheap profiles for `explorer` and `verifier`, stronger profiles for `difficult-implementation`, `judgment`, `arena-judge`, and `subcoordinator`, and diverse pools for `reviewer` and `arena-candidate` when more than one runtime/model is available. These are recommendations, not hard-coded model names.
-
-A valid one-account shape is:
-
-```yaml
-roles:
-  explorer:
-    profiles: [claude-fast]
-    strategy: first
-
-  implementation:
-    profiles: [claude-fast]
-    strategy: first
-
-  difficult-implementation:
-    profiles: [claude-strong]
-    strategy: first
-
-  judgment:
-    profiles: [claude-strong]
-    strategy: first
-
-  reviewer:
-    profiles: [claude-strong, claude-fast]
-    strategy: spread
-
-  arena-candidate:
-    profiles: [claude-strong, claude-fast]
-    strategy: spread
-
-  arena-judge:
-    profiles: [claude-strong]
-    strategy: first
-
-  verifier:
-    profiles: [claude-fast]
-    strategy: first
-
-  subcoordinator:
-    profiles: [claude-strong]
-    strategy: first
+```bash
+bun ../poteto-mode/scripts/configure-herdr.ts \
+  --input <setup.json> \
+  --dry-run
 ```
 
-### 5. Validate the route file
+Then apply it:
 
-Before writing, verify:
+```bash
+bun ../poteto-mode/scripts/configure-herdr.ts \
+  --input <setup.json>
+```
 
-1. Every role pool references an existing profile.
-2. Every profile kind is exactly `claude` or `codex`.
-3. Every explicit model slug was confirmed available for that profile's runtime.
-4. Every configured env name is a valid environment-variable name and every env value is a string.
-5. `max_depth` and `default_timeout_ms`, if present, are non-negative integers.
-6. Strategies are only `first` or `spread`.
-7. All nine semantic roles above are present.
+The script deterministically:
 
-Overwrite the whole managed route file after validation so re-runs are idempotent, while carrying forward preserved orchestration values and unrelated profile env entries.
+1. validates profile names, kinds, env keys, strategies, and all nine required roles;
+2. rejects role references to unknown profiles;
+3. preserves existing `orchestration` values unless the JSON explicitly changes them;
+4. preserves unrelated existing `env` entries on reused profile names while replacing the runtime config-home variable;
+5. writes profiles in sorted order and roles in canonical semantic-role order;
+6. writes `~/.config/pstack-herdr/routes.yaml` atomically;
+7. returns `unchanged` when the same input produces the same bytes.
 
-### 6. Confirm effective behavior
+The same subscription/config home may appear on several profiles. Separate subscriptions/accounts require separately authenticated config homes.
+
+### 5. Confirm effective behavior
 
 Tell the user:
 
@@ -157,9 +140,9 @@ Tell the user:
 - which profiles share the same subscription/config home,
 - which role maps to which profile pool,
 - which profiles force a model and which inherit,
-- and that these routes take effect for pstack delegation only while running inside Herdr.
+- and that the routes take effect for pstack delegation while running inside Herdr.
 
-If the user also wants native non-Herdr sessions configured, continue with **Native setup** after the Herdr route file is complete.
+If the user also wants native non-Herdr sessions configured, continue with **Native setup**.
 
 ## Native setup
 
