@@ -58,23 +58,6 @@ The skill bodies retain their Claude-native Agent/Task vocabulary. [`herdr-tools
 
 See [`HERDR.md`](HERDR.md) for the lower-level runtime contract.
 
-## What PR #1 added
-
-PR #1 made Herdr routing structural rather than a prompt-only convention. It introduced:
-
-- `herdr-dispatch.ts` as the executable pstack/Herdr worker boundary.
-- semantic role routing across Claude Code and Codex.
-- one or multiple authenticated CLI profiles.
-- stable profile spreading for route pools.
-- bounded recursive delegation with a default maximum depth of 3.
-- propagation of caller-selected `--cwd`, preserving pstack worktree isolation.
-- direct Herdr routing across the main delegation-heavy workflows.
-- contract tests that detect accidental loss of dispatcher integration.
-- a real Herdr dispatch CI exercise.
-- hardened CI execution with read-only repository access and explicit timeouts.
-
-Herdr activation is deliberately **not** owned by a `SessionStart` prompt. Workflows select the dispatcher structurally when running in the Herdr environment.
-
 ## Delegation roles
 
 Routing is based on semantic intent rather than hard-coded worker names:
@@ -318,9 +301,5 @@ This allows the fork to behave like normal pstack until you deliberately launch 
 - **Herdr** — [herdrdev](https://github.com/herdrdev/herdr), Apache-2.0; an external runtime, not vendored or relicensed here.
 
 See [`NOTICE.md`](NOTICE.md), [`LICENSE`](LICENSE), and [`LICENSE-cursor-team-kit`](LICENSE-cursor-team-kit) for complete attribution and license information.
-
-## Project status
-
-The Herdr runtime introduced by PR #1 is merged into `main`. Static contracts and CI protect the integration boundary; live use requires a running Herdr environment and authenticated Claude Code and/or Codex CLI profiles.
 
 For routing semantics, recursive-depth behavior, dispatcher details, and workflow safety, continue with [`HERDR.md`](HERDR.md).
