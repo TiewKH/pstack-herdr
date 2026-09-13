@@ -26,8 +26,11 @@ export interface DispatchOptions {
   timeout?: number;
   readonly: boolean;
   direction: "right" | "down";
+  placement: Placement;
   routes?: string;
 }
+
+export type Placement = "tab" | "split";
 
 export interface DispatchHandle {
   agent: string;
@@ -216,12 +219,16 @@ async function runHerdrText(args: string[], exec: HerdrExec = spawnHerdr): Promi
   return result.stdout.replace(/\s+$/, "");
 }
 
-export function paneId(payload: unknown): string {
-  const root = asObject(payload, "herdr pane split");
-  const pane = asObject(asObject(root.result, "result").pane, "result.pane");
+// `pane split` reports the new pane as result.pane; `tab create` reports it as
+// result.root_pane. Everything downstream only needs the id.
+export function paneId(payload: unknown, placement: Placement = "split"): string {
+  const key = placement === "tab" ? "root_pane" : "pane";
+  const command = placement === "tab" ? "herdr tab create" : "herdr pane split";
+  const root = asObject(payload, command);
+  const pane = asObject(asObject(root.result, "result")[key], `result.${key}`);
   const id = pane.pane_id;
   if (typeof id !== "string" || id.length === 0) {
-    throw new Error("Herdr pane split returned no result.pane.pane_id");
+    throw new Error(`${command} returned no result.${key}.pane_id`);
   }
   return id;
 }
@@ -279,6 +286,35 @@ function chooseProfile(
   return { name: "parent", profile: { kind, model: options.model ?? "inherit", env: {} } };
 }
 
+// A background tab keeps the worker off the caller's screen; a split puts it
+// beside the caller, which is what you want when watching the worker matters.
+export function placementArgs(
+  options: Pick<DispatchOptions, "placement" | "direction" | "name">,
+  cwd: string,
+  env: string[]
+): string[] {
+  switch (options.placement) {
+    case "tab":
+      return ["tab", "create", "--cwd", cwd, "--label", options.name, "--no-focus", ...env];
+    case "split":
+      return [
+        "pane",
+        "split",
+        "--current",
+        "--direction",
+        options.direction,
+        "--cwd",
+        cwd,
+        "--no-focus",
+        ...env,
+      ];
+    default: {
+      const exhaustive: never = options.placement;
+      throw new Error(`unhandled placement: ${String(exhaustive)}`);
+    }
+  }
+}
+
 export function isPaneNotReady(message: string): boolean {
   return PANE_NOT_READY.test(message);
 }
@@ -329,18 +365,8 @@ export async function dispatch(
     PSTACK_HERDR_DEPTH: String(nesting.next),
     PSTACK_HERDR_PARENT_KIND: chosen.profile.kind,
   };
-  const splitArgs = [
-    "pane",
-    "split",
-    "--current",
-    "--direction",
-    options.direction,
-    "--cwd",
-    resolve(options.cwd),
-    "--no-focus",
-    ...envFlags(childEnv),
-  ];
-  const pane = paneId(await runHerdrJson(splitArgs, exec));
+  const placeArgs = placementArgs(options, resolve(options.cwd), envFlags(childEnv));
+  const pane = paneId(await runHerdrJson(placeArgs, exec), options.placement);
   const startArgs = [
     "agent",
     "start",
@@ -402,6 +428,11 @@ async function main(): Promise<void> {
     )
     .option("--readonly", "disable write tools on the worker CLI", false)
     .option("--direction <direction>", "pane split direction", "right")
+    .option(
+      "--placement <placement>",
+      "tab for a background tab, split to sit beside the caller",
+      "tab"
+    )
     .option("--routes <path>", "routes YAML/JSON path");
   program.parse(process.argv);
   const options = program.opts<DispatchOptions>();
@@ -410,6 +441,9 @@ async function main(): Promise<void> {
   }
   if (options.direction !== "right" && options.direction !== "down") {
     throw new Error("--direction must be right or down");
+  }
+  if (options.placement !== "tab" && options.placement !== "split") {
+    throw new Error("--placement must be tab or split");
   }
   const result = await dispatch(options);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

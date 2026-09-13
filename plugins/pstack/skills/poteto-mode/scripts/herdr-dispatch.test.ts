@@ -11,6 +11,7 @@ import {
   inferParentKind,
   isPaneNotReady,
   paneId,
+  placementArgs,
   parseAgentStatus,
   readonlyAgentArgs,
   selectProfileName,
@@ -52,6 +53,7 @@ const options: DispatchOptions = {
   wait: false,
   readonly: true,
   direction: "right",
+  placement: "split",
   kind: "claude",
   routes: emptyRoutes,
 };
@@ -187,6 +189,10 @@ const splitPayload = {
   id: "cli:pane:split",
   result: { pane: { pane_id: "w1:p2" } },
 };
+const tabPayload = {
+  id: "cli:tab:create",
+  result: { root_pane: { pane_id: "w1:p9" }, tab: { tab_id: "w1:t2" } },
+};
 const getPayload = {
   id: "cli:agent:get",
   result: { agent: { agent: "claude", agent_status: "idle", name: "ci-explorer" } },
@@ -236,6 +242,12 @@ describe("herdr JSON decoders", () => {
     expect(paneId(splitPayload)).toBe("w1:p2");
     expect(() => paneId({ result: { pane: {} } })).toThrow(/result.pane.pane_id/);
     expect(() => paneId({ result: {} })).toThrow(/result.pane must be an object/);
+  });
+
+  test("paneId reads the tab root pane when placing in a tab", () => {
+    expect(paneId(tabPayload, "tab")).toBe("w1:p9");
+    expect(() => paneId(tabPayload)).toThrow(/result.pane must be an object/);
+    expect(() => paneId(splitPayload, "tab")).toThrow(/result.root_pane must be an object/);
   });
 
   test("parseAgentStatus accepts only Herdr's five states", () => {
@@ -294,6 +306,42 @@ describe("herdr-dispatch Herdr sequence", () => {
     expect(prompt).toContain("--wait");
     expect(prompt).toContain("45000");
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("tab placement keeps the worker off the caller's screen", async () => {
+    const { calls, exec } = scriptedExec({
+      "tab create": jsonResult(tabPayload),
+      "agent start": startOk,
+      "agent prompt": promptOk,
+    });
+    const result = await dispatch({ ...options, placement: "tab" }, herdrEnv, exec);
+    expect(result.pane).toBe("w1:p9");
+    const create = calls.find((args) => commandKey(args) === "tab create");
+    if (!create) throw new Error("expected tab create");
+    expect(create).toContain("--no-focus");
+    expect(create).not.toContain("--focus");
+    expect(calls.some((args) => commandKey(args) === "pane split")).toBe(false);
+  });
+
+  test("placement chooses between a background tab and a visible split", () => {
+    const env = ["--env", "K=v"];
+    expect(placementArgs({ placement: "tab", direction: "right", name: "w" }, "/repo", env)).toEqual(
+      ["tab", "create", "--cwd", "/repo", "--label", "w", "--no-focus", "--env", "K=v"]
+    );
+    expect(
+      placementArgs({ placement: "split", direction: "down", name: "w" }, "/repo", env)
+    ).toEqual([
+      "pane",
+      "split",
+      "--current",
+      "--direction",
+      "down",
+      "--cwd",
+      "/repo",
+      "--no-focus",
+      "--env",
+      "K=v",
+    ]);
   });
 
   test("retries agent start while the fresh pane has no shell prompt yet", async () => {
