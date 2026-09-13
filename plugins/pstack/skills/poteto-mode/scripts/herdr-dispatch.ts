@@ -52,6 +52,36 @@ const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 const READONLY_PREFIX =
   "Read-only worker. Do not write files, commit, or mutate the workspace.\n\n";
 
+function asObject(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function optionalNonNegativeInt(value: unknown, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative integer`);
+  }
+  return value;
+}
+
+export function parseAgentStatus(value: unknown): AgentStatus {
+  switch (value) {
+    case "idle":
+    case "working":
+    case "blocked":
+    case "done":
+    case "unknown":
+      return value;
+    default:
+      throw new Error(
+        `Herdr agent get returned invalid result.agent.agent_status: ${String(value)}`
+      );
+  }
+}
+
 function parseNonNegativeInt(raw: string | undefined, fallback: number, label: string): number {
   if (raw === undefined || raw === "") return fallback;
   if (!/^\d+$/.test(raw)) throw new Error(`${label} must be a non-negative integer`);
