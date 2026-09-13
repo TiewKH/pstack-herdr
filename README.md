@@ -4,6 +4,8 @@
 
 `pstack-herdr` is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude) that preserves pstack's rigorous engineering workflows while adding [Herdr](https://github.com/herdrdev/herdr) as the structural runtime for delegated agents.
 
+The fork currently contains 54 Agent Skills: 31 public skills and 23 `principle-*` leaves. It is synced against upstream `e8d856f` before the Herdr-specific port changes in this repository.
+
 When the coordinator runs inside Herdr (`HERDR_ENV=1`), delegation-heavy pstack workflows launch real Claude Code or Codex processes in Herdr panes. Workers are visible, independently routable, and can participate in bounded recursive delegation. Outside Herdr, the inherited Claude Code and Codex behavior remains available.
 
 > **pstack decides what work should be delegated and how it should be isolated, reviewed, and verified. Herdr provides where delegated agents run and how they are observed and controlled.**
