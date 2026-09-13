@@ -30,7 +30,17 @@ If the user has additional authenticated CLI homes, ask for their paths. Do not 
 
 Multiple profiles may share the same config home. This is how one Claude or Codex subscription can provide multiple worker/model profiles; those workers share that account's concurrency, rate, and usage limits.
 
-### 2. Collect the routing choices
+### 2. Load current state
+
+If `~/.config/pstack-herdr/routes.yaml` already exists, read it and treat its profiles, roles, strategies, models, config homes, extra env, and orchestration as the current choices. Do not rewrite it by hand; reading is the load step. If the file is missing or empty, start from the detected runtimes and the example shape in step 4. If the file exists but does not parse, stop and show the error instead of guessing.
+
+When reconstructing setup JSON from an existing file, set each profile's `config_home` from `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, and keep any other `env` entries. Omit `orchestration` from the JSON unless the user is changing it, so the writer preserves the current values.
+
+### 3. Map and confirm
+
+Show every profile (name, kind, model, config home, extra env) and every role with its current profile pool and strategy. Call out which profiles share a subscription/config home. Mark any model not in the detected set as needing a choice.
+
+Ask whether to accept as-is or change specific profiles or roles. Prefer `AskUserQuestion` over free text.
 
 Collect profiles with:
 
@@ -56,7 +66,7 @@ Each role has a non-empty `profiles` array and `strategy` of `first` or `spread`
 
 Prefer capable/cheap profiles for `explorer` and `verifier`, stronger profiles for `difficult-implementation`, `judgment`, `arena-judge`, and `subcoordinator`, and diverse pools for `reviewer` and `arena-candidate` when more than one runtime/model is available.
 
-### 3. Write the setup input JSON
+### 4. Write the setup input JSON
 
 Create a temporary JSON file shaped exactly like this (a committed copy lives at `config/setup.example.json`):
 
@@ -103,7 +113,7 @@ Only include `orchestration` when the user explicitly changes it:
 
 Do not write YAML yourself.
 
-### 4. Preview, then apply
+### 5. Preview, then apply
 
 Preview the exact canonical YAML first:
 
@@ -132,7 +142,7 @@ The script deterministically:
 
 The same subscription/config home may appear on several profiles. Separate subscriptions/accounts require separately authenticated config homes.
 
-### 5. Confirm effective behavior
+### 6. Confirm effective behavior
 
 Tell the user:
 

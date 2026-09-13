@@ -121,6 +121,12 @@ for (const role of [
     throw new Error(`setup-pstack Herdr setup is missing role: ${role}`);
   }
 }
+if (!setup.includes("If `~/.config/pstack-herdr/routes.yaml` already exists, read it")) {
+  throw new Error("setup-pstack Herdr setup does not load existing routes as current choices");
+}
+if (!setup.includes("Show every profile") || !setup.includes("Ask whether to accept as-is")) {
+  throw new Error("setup-pstack Herdr setup does not show current routes and confirm before rewriting");
+}
 if (!setup.includes("Multiple profiles may share the same config home")) {
   throw new Error("setup-pstack does not document single-subscription multi-profile routing");
 }
