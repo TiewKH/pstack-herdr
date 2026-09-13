@@ -1,30 +1,11 @@
 #!/usr/bin/env bun
 
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ensureDependenciesInstalled } from "./bootstrap.ts";
+import { expandHome, loadRoutes, type AgentKind, type Profile, type RouteStrategy, type RoutesConfig } from "./herdr-config.ts";
 
-export type AgentKind = "claude" | "codex";
-export type RouteStrategy = "spread" | "first";
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
-
-export interface Profile {
-  kind: AgentKind;
-  model?: string;
-  env?: Record<string, string>;
-}
-
-export interface RoleRoute {
-  profiles: string[];
-  strategy?: RouteStrategy;
-}
-
-export interface RoutesConfig {
-  orchestration?: { max_depth?: number; default_timeout_ms?: number };
-  profiles?: Record<string, Profile>;
-  roles?: Record<string, RoleRoute>;
-}
 
 export interface DispatchOptions {
   role: string;
@@ -71,61 +52,6 @@ const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 const READONLY_PREFIX =
   "Read-only worker. Do not write files, commit, or mutate the workspace.\n\n";
 
-function expandHome(value: string): string {
-  if (value === "~") return homedir();
-  if (value.startsWith("~/")) return resolve(homedir(), value.slice(2));
-  return value;
-}
-
-function asObject(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function optionalString(value: unknown, label: string): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value;
-}
-
-function optionalNonNegativeInt(value: unknown, label: string): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new Error(`${label} must be a non-negative integer`);
-  }
-  return value;
-}
-
-function parseAgentKind(value: unknown, label: string): AgentKind {
-  if (value === "claude" || value === "codex") return value;
-  throw new Error(`${label} must be claude or codex`);
-}
-
-export function parseAgentStatus(value: unknown): AgentStatus {
-  switch (value) {
-    case "idle":
-    case "working":
-    case "blocked":
-    case "done":
-    case "unknown":
-      return value;
-    default:
-      throw new Error(
-        `Herdr agent get returned invalid result.agent.agent_status: ${String(value)}`
-      );
-  }
-}
-
-function parseStrategy(value: unknown, label: string): RouteStrategy {
-  if (value === undefined) return "first";
-  if (value === "spread" || value === "first") return value;
-  throw new Error(`${label} must be spread or first`);
-}
-
 function parseNonNegativeInt(raw: string | undefined, fallback: number, label: string): number {
   if (raw === undefined || raw === "") return fallback;
   if (!/^\d+$/.test(raw)) throw new Error(`${label} must be a non-negative integer`);
@@ -160,104 +86,6 @@ export function selectProfileName(
       throw new Error(`unhandled route strategy: ${String(exhaustive)}`);
     }
   }
-}
-
-export function parseRoutes(text: string): RoutesConfig {
-  const trimmed = text.trim();
-  if (!trimmed) return {};
-  const raw = trimmed.startsWith("{") ? parseJsonObject(trimmed) : parseYamlObject(trimmed);
-  return validateRoutes(raw);
-}
-
-function parseJsonObject(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new Error("routes JSON is invalid", { cause: error });
-  }
-}
-
-function parseYamlObject(text: string): unknown {
-  const yaml = Bun.YAML;
-  if (typeof yaml?.parse !== "function") {
-    throw new Error("this Bun build has no YAML parser; use JSON routes or upgrade Bun");
-  }
-  return yaml.parse(text);
-}
-
-function validateRoutes(raw: unknown): RoutesConfig {
-  const root = asObject(raw, "routes");
-  const config: RoutesConfig = {};
-  if (root.orchestration !== undefined) {
-    const orchestration = asObject(root.orchestration, "orchestration");
-    config.orchestration = {
-      max_depth: optionalNonNegativeInt(orchestration.max_depth, "orchestration.max_depth"),
-      default_timeout_ms: optionalNonNegativeInt(
-        orchestration.default_timeout_ms,
-        "orchestration.default_timeout_ms"
-      ),
-    };
-  }
-  if (root.profiles !== undefined) {
-    const profilesRaw = asObject(root.profiles, "profiles");
-    const profiles: Record<string, Profile> = {};
-    for (const [name, profileRaw] of Object.entries(profilesRaw)) {
-      const profile = asObject(profileRaw, `profiles.${name}`);
-      const parsed: Profile = { kind: parseAgentKind(profile.kind, `profiles.${name}.kind`) };
-      const model = optionalString(profile.model, `profiles.${name}.model`);
-      if (model) parsed.model = model;
-      if (profile.env !== undefined) parsed.env = parseEnvMap(profile.env, `profiles.${name}.env`);
-      profiles[name] = parsed;
-    }
-    config.profiles = profiles;
-  }
-  if (root.roles !== undefined) {
-    const rolesRaw = asObject(root.roles, "roles");
-    const roles: Record<string, RoleRoute> = {};
-    for (const [name, roleRaw] of Object.entries(rolesRaw)) {
-      const role = asObject(roleRaw, `roles.${name}`);
-      if (!Array.isArray(role.profiles) || role.profiles.some((item) => typeof item !== "string")) {
-        throw new Error(`roles.${name}.profiles must be an array of strings`);
-      }
-      const profiles = role.profiles;
-      for (const profileName of profiles) {
-        if (!config.profiles?.[profileName]) {
-          throw new Error(`roles.${name} references unknown profile ${profileName}`);
-        }
-      }
-      roles[name] = {
-        profiles,
-        strategy: parseStrategy(role.strategy, `roles.${name}.strategy`),
-      };
-    }
-    config.roles = roles;
-  }
-  return config;
-}
-
-function parseEnvMap(raw: unknown, label: string): Record<string, string> {
-  const entries = asObject(raw, label);
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(entries)) {
-    if (!ENV_NAME.test(key)) throw new Error(`${label}.${key} is not a valid environment name`);
-    if (typeof value !== "string") throw new Error(`${label}.${key} must be a string`);
-    env[key] = value;
-  }
-  return env;
-}
-
-export function loadRoutes(
-  path?: string,
-  env: NodeJS.ProcessEnv = process.env
-): RoutesConfig {
-  const explicit = path ?? env.PSTACK_HERDR_ROUTES;
-  const configured = explicit ?? "~/.config/pstack-herdr/routes.yaml";
-  const resolved = expandHome(configured);
-  if (!existsSync(resolved)) {
-    if (explicit) throw new Error(`Herdr routes file not found: ${resolved}`);
-    return {};
-  }
-  return parseRoutes(readFileSync(resolved, "utf8"));
 }
 
 export function inferParentKind(env: NodeJS.ProcessEnv = process.env): AgentKind | undefined {
