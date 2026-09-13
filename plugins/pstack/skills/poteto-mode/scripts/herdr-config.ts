@@ -29,20 +29,6 @@ export interface RoutesConfig {
   roles?: Record<string, RoleRoute>;
 }
 
-export interface SetupProfileInput {
-  name: string;
-  kind: AgentKind;
-  model?: string;
-  config_home?: string;
-  env?: Record<string, string>;
-}
-
-export interface SetupInput {
-  profiles: SetupProfileInput[];
-  roles: Record<string, RoleRoute>;
-  orchestration?: { max_depth?: number; default_timeout_ms?: number };
-}
-
 export const REQUIRED_HERDR_ROLES = [
   "explorer",
   "implementation",
@@ -243,19 +229,37 @@ export function loadRoutes(
   return parseRoutes(readFileSync(resolved, "utf8"));
 }
 
-function setupProfileToRoute(profile: SetupProfileInput): Profile {
-  const env = { ...profile.env };
-  if (profile.config_home) {
-    env[configHomeEnvKey(profile.kind)] = profile.config_home;
+function foldSetupProfile(
+  raw: unknown,
+  label: string
+): { name: string; profile: Record<string, unknown> } {
+  const item = asObject(raw, label);
+  const name = optionalString(item.name, `${label}.name`);
+  if (!name || !PROFILE_NAME.test(name)) {
+    throw new Error(`${label}.name must match ${PROFILE_NAME.source}`);
   }
-  return {
-    kind: profile.kind,
-    ...(profile.model ? { model: profile.model } : {}),
-    ...(Object.keys(env).length > 0 ? { env } : {}),
-  };
+
+  const profile: Record<string, unknown> = { ...item };
+  delete profile.name;
+  const configHome = profile.config_home;
+  delete profile.config_home;
+  if (configHome === undefined) return { name, profile };
+
+  const home = optionalString(configHome, `${label}.config_home`);
+  const kind = profile.kind;
+  if (kind !== "claude" && kind !== "codex") return { name, profile };
+
+  const key = configHomeEnvKey(kind);
+  const env = profile.env;
+  if (env === undefined) {
+    profile.env = { [key]: home };
+  } else if (typeof env === "object" && env !== null && !Array.isArray(env)) {
+    profile.env = { ...env, [key]: home };
+  }
+  return { name, profile };
 }
 
-export function parseSetupInput(text: string): SetupInput {
+export function parseSetupInput(text: string): RoutesConfig {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -269,37 +273,17 @@ export function parseSetupInput(text: string): SetupInput {
   }
 
   const seen = new Set<string>();
-  const profiles: SetupProfileInput[] = root.profiles.map((item, index) => {
-    const label = `setup input.profiles[${index}]`;
-    const profile = asObject(item, label);
-    const name = optionalString(profile.name, `${label}.name`);
-    if (!name || !PROFILE_NAME.test(name)) {
-      throw new Error(`${label}.name must match ${PROFILE_NAME.source}`);
-    }
+  const profiles: Record<string, unknown> = {};
+  root.profiles.forEach((item, index) => {
+    const { name, profile } = foldSetupProfile(item, `setup input.profiles[${index}]`);
     if (seen.has(name)) throw new Error(`duplicate setup profile: ${name}`);
     seen.add(name);
-
-    const parsed = parseProfile(profile, label);
-    const configHome = optionalString(profile.config_home, `${label}.config_home`);
-    if (configHome && /[\r\n]/.test(configHome)) {
-      throw new Error(`${label}.config_home contains a newline`);
-    }
-
-    const setupProfile: SetupProfileInput = { name, kind: parsed.kind };
-    if (parsed.model) setupProfile.model = parsed.model;
-    if (configHome) setupProfile.config_home = configHome;
-    if (parsed.env) setupProfile.env = parsed.env;
-    return setupProfile;
+    profiles[name] = profile;
   });
-
-  const profileMap: Record<string, Profile> = {};
-  for (const profile of profiles) {
-    profileMap[profile.name] = setupProfileToRoute(profile);
-  }
 
   const routes = validateRoutes({
     orchestration: root.orchestration,
-    profiles: profileMap,
+    profiles,
     roles: asObject(root.roles, "setup input.roles"),
   });
 
@@ -308,20 +292,22 @@ export function parseSetupInput(text: string): SetupInput {
     if (!roles[role]) throw new Error(`setup input.roles is missing required role: ${role}`);
   }
 
-  return { profiles, roles, orchestration: routes.orchestration };
+  return routes;
 }
 
-export function buildRoutes(existing: RoutesConfig, input: SetupInput): RoutesConfig {
+export function buildRoutes(existing: RoutesConfig, input: RoutesConfig): RoutesConfig {
+  const incoming = input.profiles ?? {};
   const profiles: Record<string, Profile> = {};
 
-  for (const item of [...input.profiles].sort((a, b) => a.name.localeCompare(b.name))) {
-    const oldEnv = existing.profiles?.[item.name]?.env ?? {};
+  for (const name of Object.keys(incoming).sort()) {
+    const item = incoming[name];
+    const oldEnv = existing.profiles?.[name]?.env ?? {};
     const env: Record<string, string> = { ...oldEnv };
     delete env.CLAUDE_CONFIG_DIR;
     delete env.CODEX_HOME;
-    Object.assign(env, setupProfileToRoute(item).env ?? {});
+    Object.assign(env, item.env ?? {});
 
-    profiles[item.name] = {
+    profiles[name] = {
       kind: item.kind,
       model: item.model ?? "inherit",
       ...(Object.keys(env).length > 0 ? { env } : {}),
@@ -337,7 +323,7 @@ export function buildRoutes(existing: RoutesConfig, input: SetupInput): RoutesCo
         180000,
     },
     profiles,
-    roles: input.roles,
+    roles: input.roles ?? {},
   };
 }
 
