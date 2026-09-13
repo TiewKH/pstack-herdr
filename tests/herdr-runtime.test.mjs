@@ -10,6 +10,7 @@ const mapping = read("plugins/pstack/skills/poteto-mode/references/herdr-tools.m
 const poteto = read("plugins/pstack/skills/poteto-mode/SKILL.md");
 const hook = read("plugins/pstack/hooks/session-start-context.md");
 const routes = read("config/routes.example.yaml");
+const setup = read("plugins/pstack/skills/setup-pstack/SKILL.md");
 const skills = ["how", "why", "arena", "interrogate", "swarm", "reflect"];
 const playbooks = [
   "feature",
@@ -75,4 +76,36 @@ for (const role of [
 if (routes.includes("workspace:") || routes.includes("round-robin") || routes.includes("strongest-first")) {
   throw new Error("route example still documents unused workspace or collapsed strategy names");
 }
+
+if (!setup.includes("If `HERDR_ENV=1`, follow **Herdr setup**")) {
+  throw new Error("setup-pstack does not branch on Herdr runtime");
+}
+if (!setup.includes("~/.config/pstack-herdr/routes.yaml")) {
+  throw new Error("setup-pstack does not configure the Herdr route file");
+}
+if (!setup.includes("Herdr-backed delegation does not read `~/.claude/pstack-models.md`")) {
+  throw new Error("setup-pstack does not explain the native override is bypassed by Herdr");
+}
+for (const role of [
+  "explorer",
+  "implementation",
+  "difficult-implementation",
+  "judgment",
+  "reviewer",
+  "arena-candidate",
+  "arena-judge",
+  "verifier",
+  "subcoordinator",
+]) {
+  if (!setup.includes(``\`${role}\```)) {
+    throw new Error(`setup-pstack Herdr setup is missing role: ${role}`);
+  }
+}
+if (!setup.includes("Multiple profiles may share the same config home")) {
+  throw new Error("setup-pstack does not document single-subscription multi-profile routing");
+}
+if (!setup.includes("## Native setup") || !setup.includes("~/.claude/pstack-models.md")) {
+  throw new Error("setup-pstack lost the native fallback configuration path");
+}
+
 console.log("Native Herdr dispatch contract checks passed");
