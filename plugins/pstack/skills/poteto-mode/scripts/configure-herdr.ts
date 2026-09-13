@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ensureDependenciesInstalled } from "./bootstrap.ts";
 import {
   buildRoutes,
+  expandHome,
   loadRoutes,
   parseSetupInput,
   renderRoutesYaml,
@@ -31,7 +32,8 @@ async function main(): Promise<void> {
   program.parse(process.argv);
   const options = program.opts<Options>();
   const input = parseSetupInput(readFileSync(resolve(options.input), "utf8"));
-  const existing = loadRoutes(options.output);
+  const outputPath = expandHome(options.output);
+  const existing = existsSync(outputPath) ? loadRoutes(options.output) : {};
   const next = buildRoutes(existing, input);
   const yaml = renderRoutesYaml(next);
 
