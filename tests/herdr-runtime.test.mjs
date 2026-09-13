@@ -11,7 +11,19 @@ const poteto = read("plugins/pstack/skills/poteto-mode/SKILL.md");
 const hook = read("plugins/pstack/hooks/session-start-context.md");
 const routes = read("config/routes.example.yaml");
 const setup = read("plugins/pstack/skills/setup-pstack/SKILL.md");
-const skills = ["how", "why", "arena", "interrogate", "swarm", "reflect"];
+const skills = [
+  "how",
+  "why",
+  "arena",
+  "interrogate",
+  "swarm",
+  "reflect",
+  "automate-me",
+  "maintain-verification-skill",
+  "show-me-your-work",
+  "recall",
+  "no-comments",
+];
 const playbooks = [
   "feature",
   "bug-fix",
@@ -32,6 +44,11 @@ if (hook.includes("pstack:herdr-runtime") || hook.includes("HERDR_ENV=1")) {
 if (!mapping.includes("herdr-dispatch.ts")) throw new Error("Herdr mapping does not point to dispatcher");
 if (!mapping.includes("| `how` |") || !mapping.includes("| Feature / bug-fix")) {
   throw new Error("Herdr mapping is missing per-skill notes");
+}
+for (const skill of ["automate-me", "maintain-verification-skill", "show-me-your-work", "recall", "no-comments"]) {
+  if (!mapping.includes(`| `${skill}` |`)) {
+    throw new Error(`Herdr mapping is missing delegated skill note: ${skill}`);
+  }
 }
 if (!poteto.includes("herdr-tools.md")) {
   throw new Error("poteto-mode Platform Adaptation does not point at the Herdr mapping");
