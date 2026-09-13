@@ -4,6 +4,8 @@
 
 `pstack-herdr` is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude) that preserves pstack's rigorous engineering workflows while adding [Herdr](https://github.com/herdrdev/herdr) as the structural runtime for delegated agents.
 
+The fork currently contains 54 Agent Skills: 31 public skills and 23 `principle-*` leaves. It is synced against upstream `e8d856f` before the Herdr-specific port changes in this repository.
+
 When the coordinator runs inside Herdr (`HERDR_ENV=1`), delegation-heavy pstack workflows launch real Claude Code or Codex processes in Herdr panes. Workers are visible, independently routable, and can participate in bounded recursive delegation. Outside Herdr, the inherited Claude Code and Codex behavior remains available.
 
 > **pstack decides what work should be delegated and how it should be isolated, reviewed, and verified. Herdr provides where delegated agents run and how they are observed and controlled.**
@@ -231,6 +233,7 @@ PR #1 migrated direct delegation paths for:
 
 - Feature, Bug fix, Refactoring, Perf issue, Hillclimb, Eval, Autonomous run.
 - How, Why, Arena, Swarm, Interrogate, Reflect.
+- Automate me, Recall, No comments, Show me your work, Maintain verification skill.
 - Orchestrate, Autopilot-full, Autopilot-stack.
 
 `Architect` inherits Herdr through How/Why/Arena/Interrogate. `Figure-it-out` inherits it through Architect and through the delegated execution plan it creates.
@@ -270,6 +273,44 @@ See [`CHANGES.md`](CHANGES.md) for the detailed port/sync audit and [`NOTICE.md`
 ├── NOTICE.md                          # attribution and upstream pins
 └── README.md
 ```
+
+## Slash commands
+
+The table below is also the source of truth used by `tools/generate.mjs` for Codex slash-command prompt names, descriptions, and ordering.
+
+| command | use it when |
+| --- | --- |
+| `/poteto-mode` | default entry point for any non-trivial task |
+| `/how` | walk through how a subsystem works |
+| `/why` | investigate why something was built this way (parallel multi-MCP evidence) |
+| `/architect` | settle types and module shape before writing code that crosses a function boundary |
+| `/arena` | run N parallel attempts at the same task and pick the best parts |
+| `/interrogate` | have three different models try to break a diff |
+| `/automate-me` | draft your own personal -mode skill from recent transcripts |
+| `/reflect` | capture a long task's lessons as a skill edit |
+| `/tdd` | fix a bug by writing the failing test first, then the fix |
+| `/typescript-best-practices` | ground type-system discipline in TypeScript syntax |
+| `/teach` | explain a subsystem plainly by composing how + why |
+| `/swarm` | fan out N parallel workers across slices or races, then return one aggregated report |
+| `/technical-writing` | write docs, RFCs, readmes, PR descriptions, and commit messages to one layered standard |
+| `/bro` | restate the last message in plain human language, no jargon |
+| `/figure-it-out` | design a rigorous, auditable playbook for a task no bundled playbook fits |
+| `/show-me-your-work` | log decisions to a reviewable tsv decision trail |
+| `/blast-radius` | find what a change could break beyond the diff and prove safety by running code |
+| `/recall` | catch up on recent working context from chat history, live state, and the shared record |
+| `/setup-pstack` | configure pstack per-role model choices |
+| `/unslop` | clean up writing by removing AI tells |
+| `/no-comments` | strip comments before review, fix the accepted findings, encode claimed constraints |
+| `/create-verification-skill` | generate a project-local verification skill and feature map |
+| `/maintain-verification-skill` | re-sync a drifted verification skill and its feature map |
+| `/deslop` | deslop a diff before commit |
+| `/babysit` | monitor an open PR, fix CI/comments, keep it merge-ready |
+| `/thermo-nuclear-code-quality-review` | extremely strict maintainability audit |
+| `/make-pr-easy-to-review` | clean noisy history and improve PR description before review |
+| `/fix-ci` | find failing PR checks, inspect logs, apply focused fixes |
+| `/fix-merge-conflicts` | non-interactively resolve merge conflicts, validate, finalize |
+| `/get-pr-comments` | fetch and summarize review comments from the active PR |
+| `/what-did-i-get-done` | summarize authored commits over a user-chosen period |
 
 ## Development and validation
 

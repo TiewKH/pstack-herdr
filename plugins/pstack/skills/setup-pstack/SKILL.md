@@ -1,11 +1,160 @@
 ---
 name: setup-pstack
-description: Configure which models pstack uses per role. Detects your available Claude models and writes a per-role override file that the user can include from their CLAUDE.md. Use for /setup-pstack, "configure pstack models", or changing pstack's model choices.
+description: Configure which models and worker profiles pstack uses. In Herdr sessions, writes role/profile routing to ~/.config/pstack-herdr/routes.yaml; outside Herdr, writes the native Claude model override sheet. Use for /setup-pstack, "configure pstack models", or changing pstack's model choices.
 ---
 
 # Setup pstack
 
-On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill.
+Choose the setup path from the runtime first:
+
+- If `HERDR_ENV=1`, follow **Herdr setup** below. Herdr-backed delegation does not read `~/.claude/pstack-models.md`; worker kind, account/config home, and model come from `~/.config/pstack-herdr/routes.yaml`.
+- Otherwise follow **Native setup**. On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following the native steps.
+
+Do not configure both layers unless the user explicitly wants native fallback behavior configured too.
+
+## Herdr setup
+
+Herdr-backed delegation reads `~/.config/pstack-herdr/routes.yaml`. Do not hand-author that file. The deterministic writer is:
+
+```bash
+bun ../poteto-mode/scripts/configure-herdr.ts --input <setup.json>
+```
+
+The setup skill owns discovery and user choices. The script owns validation, canonical serialization, preservation rules, atomic writes, and idempotency.
+
+### 1. Detect worker runtimes and models
+
+Determine which worker CLIs are available for Herdr to launch: Claude Code, Codex, or both. Enumerate only model slugs confirmed usable by the corresponding CLI/session.
+
+If the user has additional authenticated CLI homes, ask for their paths. Do not copy, move, or inspect credentials. Treat each config home as an opaque authenticated profile.
+
+Multiple profiles may share the same config home. This is how one Claude or Codex subscription can provide multiple worker/model profiles; those workers share that account's concurrency, rate, and usage limits.
+
+### 2. Load current state
+
+If `~/.config/pstack-herdr/routes.yaml` already exists, read it and treat its profiles, roles, strategies, models, config homes, extra env, and orchestration as the current choices. Do not rewrite it by hand; reading is the load step. If the file is missing or empty, start from the detected runtimes and the example shape in step 4. If the file exists but does not parse, stop and show the error instead of guessing.
+
+When reconstructing setup JSON from an existing file, set each profile's `config_home` from `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, and keep any other `env` entries. Omit `orchestration` from the JSON unless the user is changing it, so the writer preserves the current values.
+
+### 3. Map and confirm
+
+Show every profile (name, kind, model, config home, extra env) and every role with its current profile pool and strategy. Call out which profiles share a subscription/config home. Mark any model not in the detected set as needing a choice.
+
+Ask whether to accept as-is or change specific profiles or roles. Prefer `AskUserQuestion` over free text.
+
+Collect profiles with:
+
+- a stable profile `name`,
+- `kind`: `claude` or `codex`,
+- optional `model` (use `inherit` when no model should be forced),
+- optional `config_home`,
+- optional extra `env` entries.
+
+Collect all nine required semantic roles:
+
+- `explorer`
+- `implementation`
+- `difficult-implementation`
+- `judgment`
+- `reviewer`
+- `arena-candidate`
+- `arena-judge`
+- `verifier`
+- `subcoordinator`
+
+Each role has a non-empty `profiles` array and `strategy` of `first` or `spread`.
+
+Prefer capable/cheap profiles for `explorer` and `verifier`, stronger profiles for `difficult-implementation`, `judgment`, `arena-judge`, and `subcoordinator`, and diverse pools for `reviewer` and `arena-candidate` when more than one runtime/model is available.
+
+### 4. Write the setup input JSON
+
+Create a temporary JSON file shaped exactly like this (a committed copy lives at `config/setup.example.json`):
+
+```json
+{
+  "profiles": [
+    {
+      "name": "claude-strong",
+      "kind": "claude",
+      "model": "<confirmed-strong-model>",
+      "config_home": "~/.claude"
+    },
+    {
+      "name": "claude-fast",
+      "kind": "claude",
+      "model": "<confirmed-fast-model>",
+      "config_home": "~/.claude"
+    }
+  ],
+  "roles": {
+    "explorer": { "profiles": ["claude-fast"], "strategy": "first" },
+    "implementation": { "profiles": ["claude-fast"], "strategy": "first" },
+    "difficult-implementation": { "profiles": ["claude-strong"], "strategy": "first" },
+    "judgment": { "profiles": ["claude-strong"], "strategy": "first" },
+    "reviewer": { "profiles": ["claude-strong", "claude-fast"], "strategy": "spread" },
+    "arena-candidate": { "profiles": ["claude-strong", "claude-fast"], "strategy": "spread" },
+    "arena-judge": { "profiles": ["claude-strong"], "strategy": "first" },
+    "verifier": { "profiles": ["claude-fast"], "strategy": "first" },
+    "subcoordinator": { "profiles": ["claude-strong"], "strategy": "first" }
+  }
+}
+```
+
+Only include `orchestration` when the user explicitly changes it:
+
+```json
+{
+  "orchestration": {
+    "max_depth": 3,
+    "default_timeout_ms": 180000
+  }
+}
+```
+
+Do not write YAML yourself.
+
+### 5. Preview, then apply
+
+Preview the exact canonical YAML first:
+
+```bash
+bun ../poteto-mode/scripts/configure-herdr.ts \
+  --input <setup.json> \
+  --dry-run
+```
+
+Then apply it:
+
+```bash
+bun ../poteto-mode/scripts/configure-herdr.ts \
+  --input <setup.json>
+```
+
+The script deterministically:
+
+1. validates profile names, kinds, env keys, strategies, and all nine required roles;
+2. rejects role references to unknown profiles;
+3. preserves existing `orchestration` values unless the JSON explicitly changes them;
+4. preserves unrelated existing `env` entries on reused profile names while replacing the runtime config-home variable;
+5. writes profiles in sorted order and roles in canonical semantic-role order;
+6. writes `~/.config/pstack-herdr/routes.yaml` atomically;
+7. returns `unchanged` when the same input produces the same bytes.
+
+The same subscription/config home may appear on several profiles. Separate subscriptions/accounts require separately authenticated config homes.
+
+### 6. Confirm effective behavior
+
+Tell the user:
+
+- the route file path,
+- which profiles share the same subscription/config home,
+- which role maps to which profile pool,
+- which profiles force a model and which inherit,
+- and that the routes take effect for pstack delegation while running inside Herdr.
+
+If the user also wants native non-Herdr sessions configured, continue with **Native setup**.
+
+## Native setup
 
 Write `~/.claude/pstack-models.md`, a per-role model override sheet you include from your global `CLAUDE.md`. Each pstack skill names a default model inline; the override sheet is the layer that adapts those defaults to the models you actually have access to.
 
@@ -17,11 +166,9 @@ Claude Code has no auto-applied "rules" mechanism like Cursor's `.mdc`. Inclusio
 
 so the file is loaded as context for every session.
 
-## Steps
-
 ### 1. Detect available models
 
-Enumerate the model slugs you can pass to an `Agent` subagent in this session — that is the dependable source. The currently available Claude models and the default panel are listed in [Models](#models) below; the quad is chosen for cross-family, cross-tier diversity, and the single-role default stays out of the panels because it already covers the single-model roles. Ask the user to confirm or paste any additional slugs they want available. Never write a real slug you have not confirmed is available. The aliases `inherit-parent` and `auto` are always valid even though they are not detected slugs; both mean the role runs on the parent session's model, which the `Agent` call expresses by omitting `model`.
+Enumerate the model slugs you can pass to an `Agent` subagent in this session — that is the dependable source. The currently available Claude models and the default panel are listed in [Models](#models) below; the panel is chosen for cross-family, cross-tier diversity, and the single-role default stays out of the panels because it already covers the single-model roles. Ask the user to confirm or paste any additional slugs they want available. Never write a real slug you have not confirmed is available. The aliases `inherit-parent` and `auto` are always valid even though they are not detected slugs; both mean the role runs on the parent session's model, which the `Agent` call expresses by omitting `model`.
 
 ### 2. Load current state
 

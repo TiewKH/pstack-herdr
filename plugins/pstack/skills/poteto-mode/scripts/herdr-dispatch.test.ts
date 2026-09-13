@@ -2,23 +2,23 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { loadRoutes, parseRoutes, type RoutesConfig } from "./herdr-config.ts";
 import {
   agentStatus,
   applyReadonlyPrompt,
   dispatch,
   envFlags,
   inferParentKind,
-  loadRoutes,
+  isPaneNotReady,
   paneId,
+  placementArgs,
   parseAgentStatus,
-  parseRoutes,
   readonlyAgentArgs,
   selectProfileName,
   stableIndex,
   type CommandResult,
   type DispatchOptions,
   type HerdrExec,
-  type RoutesConfig,
 } from "./herdr-dispatch.ts";
 
 const config: RoutesConfig = {
@@ -53,6 +53,7 @@ const options: DispatchOptions = {
   wait: false,
   readonly: true,
   direction: "right",
+  placement: "split",
   kind: "claude",
   routes: emptyRoutes,
 };
@@ -188,6 +189,10 @@ const splitPayload = {
   id: "cli:pane:split",
   result: { pane: { pane_id: "w1:p2" } },
 };
+const tabPayload = {
+  id: "cli:tab:create",
+  result: { root_pane: { pane_id: "w1:p9" }, tab: { tab_id: "w1:t2" } },
+};
 const getPayload = {
   id: "cli:agent:get",
   result: { agent: { agent: "claude", agent_status: "idle", name: "ci-explorer" } },
@@ -237,6 +242,12 @@ describe("herdr JSON decoders", () => {
     expect(paneId(splitPayload)).toBe("w1:p2");
     expect(() => paneId({ result: { pane: {} } })).toThrow(/result.pane.pane_id/);
     expect(() => paneId({ result: {} })).toThrow(/result.pane must be an object/);
+  });
+
+  test("paneId reads the tab root pane when placing in a tab", () => {
+    expect(paneId(tabPayload, "tab")).toBe("w1:p9");
+    expect(() => paneId(tabPayload)).toThrow(/result.pane must be an object/);
+    expect(() => paneId(splitPayload, "tab")).toThrow(/result.root_pane must be an object/);
   });
 
   test("parseAgentStatus accepts only Herdr's five states", () => {
@@ -295,6 +306,75 @@ describe("herdr-dispatch Herdr sequence", () => {
     expect(prompt).toContain("--wait");
     expect(prompt).toContain("45000");
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("tab placement keeps the worker off the caller's screen", async () => {
+    const { calls, exec } = scriptedExec({
+      "tab create": jsonResult(tabPayload),
+      "agent start": startOk,
+      "agent prompt": promptOk,
+    });
+    const result = await dispatch({ ...options, placement: "tab" }, herdrEnv, exec);
+    expect(result.pane).toBe("w1:p9");
+    const create = calls.find((args) => commandKey(args) === "tab create");
+    if (!create) throw new Error("expected tab create");
+    expect(create).toContain("--no-focus");
+    expect(create).not.toContain("--focus");
+    expect(calls.some((args) => commandKey(args) === "pane split")).toBe(false);
+  });
+
+  test("placement chooses between a background tab and a visible split", () => {
+    const env = ["--env", "K=v"];
+    expect(placementArgs({ placement: "tab", direction: "right", name: "w" }, "/repo", env)).toEqual(
+      ["tab", "create", "--cwd", "/repo", "--label", "w", "--no-focus", "--env", "K=v"]
+    );
+    expect(
+      placementArgs({ placement: "split", direction: "down", name: "w" }, "/repo", env)
+    ).toEqual([
+      "pane",
+      "split",
+      "--current",
+      "--direction",
+      "down",
+      "--cwd",
+      "/repo",
+      "--no-focus",
+      "--env",
+      "K=v",
+    ]);
+  });
+
+  test("retries agent start while the fresh pane has no shell prompt yet", async () => {
+    let attempts = 0;
+    const { calls, exec } = scriptedExec({
+      "pane split": splitOk,
+      "agent start": () => {
+        attempts += 1;
+        return attempts < 3
+          ? failed(
+              '{"error":{"code":"agent_pane_busy","message":"agent target pane w1:p2 is not an available shell"}}'
+            )
+          : startOk;
+      },
+      "agent prompt": promptOk,
+    });
+    await dispatch(options, herdrEnv, exec);
+    expect(attempts).toBe(3);
+    expect(calls.map(commandKey)).toEqual([
+      "pane split",
+      "agent start",
+      "agent start",
+      "agent start",
+      "agent prompt",
+    ]);
+    expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("only a pane that is not yet a shell is worth retrying", () => {
+    expect(isPaneNotReady('{"error":{"code":"agent_pane_busy"}}')).toBe(true);
+    expect(isPaneNotReady("agent target pane w1:p2 is not an available shell")).toBe(true);
+    expect(isPaneNotReady("agent_not_ready")).toBe(false);
+    expect(isPaneNotReady("agent_prompt_stalled")).toBe(false);
   });
 
   test("closes the pane when agent start fails", async () => {

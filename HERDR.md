@@ -65,6 +65,7 @@ Herdr routing is structural in the direct delegation paths for:
 
 - Feature, Bug fix, Refactoring, Perf issue, Hillclimb, Eval, Autonomous run.
 - How, Why, Arena, Swarm, Interrogate, Reflect.
+- Automate me, Recall, No comments, Show me your work, Maintain verification skill.
 - Orchestrate, Autopilot-full, and Autopilot-stack.
 - Architect inherits Herdr through How/Why/Arena/Interrogate.
 - Figure-it-out inherits it through Architect and whatever delegated execution playbook it designs.

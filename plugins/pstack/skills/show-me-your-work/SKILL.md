@@ -5,6 +5,8 @@ description: "Keep a reviewable decision trail for long-running or unattended wo
 
 # Show me your work
 
+On Herdr, read the [Herdr execution mapping](../poteto-mode/references/herdr-tools.md), including its per-skill notes, before following this skill.
+
 Keep one canonical log.
 
 ## The format

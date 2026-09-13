@@ -1,30 +1,17 @@
 #!/usr/bin/env bun
 
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ensureDependenciesInstalled } from "./bootstrap.ts";
+import {
+  expandHome,
+  loadRoutes,
+  type AgentKind,
+  type Profile,
+  type RoutesConfig,
+} from "./herdr-config.ts";
 
-export type AgentKind = "claude" | "codex";
-export type RouteStrategy = "spread" | "first";
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
-
-export interface Profile {
-  kind: AgentKind;
-  model?: string;
-  env?: Record<string, string>;
-}
-
-export interface RoleRoute {
-  profiles: string[];
-  strategy?: RouteStrategy;
-}
-
-export interface RoutesConfig {
-  orchestration?: { max_depth?: number; default_timeout_ms?: number };
-  profiles?: Record<string, Profile>;
-  roles?: Record<string, RoleRoute>;
-}
 
 export interface DispatchOptions {
   role: string;
@@ -39,8 +26,11 @@ export interface DispatchOptions {
   timeout?: number;
   readonly: boolean;
   direction: "right" | "down";
+  placement: Placement;
   routes?: string;
 }
+
+export type Placement = "tab" | "split";
 
 export interface DispatchHandle {
   agent: string;
@@ -68,14 +58,14 @@ export type HerdrExec = (args: string[]) => Promise<CommandResult>;
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+// A freshly split pane needs a moment to reach its interactive shell prompt, and
+// `herdr agent start` rejects the pane until it does. Herdr's own readiness wait
+// defaults to 30s, so give the shell the same budget.
+const SHELL_READY_TIMEOUT_MS = 30000;
+const SHELL_READY_POLL_MS = 250;
+const PANE_NOT_READY = /agent_pane_busy|not an available shell/;
 const READONLY_PREFIX =
   "Read-only worker. Do not write files, commit, or mutate the workspace.\n\n";
-
-function expandHome(value: string): string {
-  if (value === "~") return homedir();
-  if (value.startsWith("~/")) return resolve(homedir(), value.slice(2));
-  return value;
-}
 
 function asObject(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -84,25 +74,12 @@ function asObject(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function optionalString(value: unknown, label: string): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`${label} must be a non-empty string`);
-  }
-  return value;
-}
-
 function optionalNonNegativeInt(value: unknown, label: string): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new Error(`${label} must be a non-negative integer`);
   }
   return value;
-}
-
-function parseAgentKind(value: unknown, label: string): AgentKind {
-  if (value === "claude" || value === "codex") return value;
-  throw new Error(`${label} must be claude or codex`);
 }
 
 export function parseAgentStatus(value: unknown): AgentStatus {
@@ -118,12 +95,6 @@ export function parseAgentStatus(value: unknown): AgentStatus {
         `Herdr agent get returned invalid result.agent.agent_status: ${String(value)}`
       );
   }
-}
-
-function parseStrategy(value: unknown, label: string): RouteStrategy {
-  if (value === undefined) return "first";
-  if (value === "spread" || value === "first") return value;
-  throw new Error(`${label} must be spread or first`);
 }
 
 function parseNonNegativeInt(raw: string | undefined, fallback: number, label: string): number {
@@ -160,104 +131,6 @@ export function selectProfileName(
       throw new Error(`unhandled route strategy: ${String(exhaustive)}`);
     }
   }
-}
-
-export function parseRoutes(text: string): RoutesConfig {
-  const trimmed = text.trim();
-  if (!trimmed) return {};
-  const raw = trimmed.startsWith("{") ? parseJsonObject(trimmed) : parseYamlObject(trimmed);
-  return validateRoutes(raw);
-}
-
-function parseJsonObject(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new Error("routes JSON is invalid", { cause: error });
-  }
-}
-
-function parseYamlObject(text: string): unknown {
-  const yaml = Bun.YAML;
-  if (typeof yaml?.parse !== "function") {
-    throw new Error("this Bun build has no YAML parser; use JSON routes or upgrade Bun");
-  }
-  return yaml.parse(text);
-}
-
-function validateRoutes(raw: unknown): RoutesConfig {
-  const root = asObject(raw, "routes");
-  const config: RoutesConfig = {};
-  if (root.orchestration !== undefined) {
-    const orchestration = asObject(root.orchestration, "orchestration");
-    config.orchestration = {
-      max_depth: optionalNonNegativeInt(orchestration.max_depth, "orchestration.max_depth"),
-      default_timeout_ms: optionalNonNegativeInt(
-        orchestration.default_timeout_ms,
-        "orchestration.default_timeout_ms"
-      ),
-    };
-  }
-  if (root.profiles !== undefined) {
-    const profilesRaw = asObject(root.profiles, "profiles");
-    const profiles: Record<string, Profile> = {};
-    for (const [name, profileRaw] of Object.entries(profilesRaw)) {
-      const profile = asObject(profileRaw, `profiles.${name}`);
-      const parsed: Profile = { kind: parseAgentKind(profile.kind, `profiles.${name}.kind`) };
-      const model = optionalString(profile.model, `profiles.${name}.model`);
-      if (model) parsed.model = model;
-      if (profile.env !== undefined) parsed.env = parseEnvMap(profile.env, `profiles.${name}.env`);
-      profiles[name] = parsed;
-    }
-    config.profiles = profiles;
-  }
-  if (root.roles !== undefined) {
-    const rolesRaw = asObject(root.roles, "roles");
-    const roles: Record<string, RoleRoute> = {};
-    for (const [name, roleRaw] of Object.entries(rolesRaw)) {
-      const role = asObject(roleRaw, `roles.${name}`);
-      if (!Array.isArray(role.profiles) || role.profiles.some((item) => typeof item !== "string")) {
-        throw new Error(`roles.${name}.profiles must be an array of strings`);
-      }
-      const profiles = role.profiles;
-      for (const profileName of profiles) {
-        if (!config.profiles?.[profileName]) {
-          throw new Error(`roles.${name} references unknown profile ${profileName}`);
-        }
-      }
-      roles[name] = {
-        profiles,
-        strategy: parseStrategy(role.strategy, `roles.${name}.strategy`),
-      };
-    }
-    config.roles = roles;
-  }
-  return config;
-}
-
-function parseEnvMap(raw: unknown, label: string): Record<string, string> {
-  const entries = asObject(raw, label);
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(entries)) {
-    if (!ENV_NAME.test(key)) throw new Error(`${label}.${key} is not a valid environment name`);
-    if (typeof value !== "string") throw new Error(`${label}.${key} must be a string`);
-    env[key] = value;
-  }
-  return env;
-}
-
-export function loadRoutes(
-  path?: string,
-  env: NodeJS.ProcessEnv = process.env
-): RoutesConfig {
-  const explicit = path ?? env.PSTACK_HERDR_ROUTES;
-  const configured = explicit ?? "~/.config/pstack-herdr/routes.yaml";
-  const resolved = expandHome(configured);
-  if (!existsSync(resolved)) {
-    if (explicit) throw new Error(`Herdr routes file not found: ${resolved}`);
-    return {};
-  }
-  return parseRoutes(readFileSync(resolved, "utf8"));
 }
 
 export function inferParentKind(env: NodeJS.ProcessEnv = process.env): AgentKind | undefined {
@@ -346,12 +219,16 @@ async function runHerdrText(args: string[], exec: HerdrExec = spawnHerdr): Promi
   return result.stdout.replace(/\s+$/, "");
 }
 
-export function paneId(payload: unknown): string {
-  const root = asObject(payload, "herdr pane split");
-  const pane = asObject(asObject(root.result, "result").pane, "result.pane");
+// `pane split` reports the new pane as result.pane; `tab create` reports it as
+// result.root_pane. Everything downstream only needs the id.
+export function paneId(payload: unknown, placement: Placement = "split"): string {
+  const key = placement === "tab" ? "root_pane" : "pane";
+  const command = placement === "tab" ? "herdr tab create" : "herdr pane split";
+  const root = asObject(payload, command);
+  const pane = asObject(asObject(root.result, "result")[key], `result.${key}`);
   const id = pane.pane_id;
   if (typeof id !== "string" || id.length === 0) {
-    throw new Error("Herdr pane split returned no result.pane.pane_id");
+    throw new Error(`${command} returned no result.${key}.pane_id`);
   }
   return id;
 }
@@ -409,6 +286,57 @@ function chooseProfile(
   return { name: "parent", profile: { kind, model: options.model ?? "inherit", env: {} } };
 }
 
+// A background tab keeps the worker off the caller's screen; a split puts it
+// beside the caller, which is what you want when watching the worker matters.
+export function placementArgs(
+  options: Pick<DispatchOptions, "placement" | "direction" | "name">,
+  cwd: string,
+  env: string[]
+): string[] {
+  switch (options.placement) {
+    case "tab":
+      return ["tab", "create", "--cwd", cwd, "--label", options.name, "--no-focus", ...env];
+    case "split":
+      return [
+        "pane",
+        "split",
+        "--current",
+        "--direction",
+        options.direction,
+        "--cwd",
+        cwd,
+        "--no-focus",
+        ...env,
+      ];
+    default: {
+      const exhaustive: never = options.placement;
+      throw new Error(`unhandled placement: ${String(exhaustive)}`);
+    }
+  }
+}
+
+export function isPaneNotReady(message: string): boolean {
+  return PANE_NOT_READY.test(message);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((done) => setTimeout(done, ms));
+}
+
+async function startAgent(args: string[], exec: HerdrExec): Promise<void> {
+  const deadline = Date.now() + SHELL_READY_TIMEOUT_MS;
+  for (;;) {
+    try {
+      await runHerdrCommand(args, exec);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!isPaneNotReady(message) || Date.now() >= deadline) throw error;
+      await sleep(SHELL_READY_POLL_MS);
+    }
+  }
+}
+
 async function closePane(pane: string, exec: HerdrExec): Promise<void> {
   try {
     await runHerdrCommand(["pane", "close", pane], exec);
@@ -437,18 +365,8 @@ export async function dispatch(
     PSTACK_HERDR_DEPTH: String(nesting.next),
     PSTACK_HERDR_PARENT_KIND: chosen.profile.kind,
   };
-  const splitArgs = [
-    "pane",
-    "split",
-    "--current",
-    "--direction",
-    options.direction,
-    "--cwd",
-    resolve(options.cwd),
-    "--no-focus",
-    ...envFlags(childEnv),
-  ];
-  const pane = paneId(await runHerdrJson(splitArgs, exec));
+  const placeArgs = placementArgs(options, resolve(options.cwd), envFlags(childEnv));
+  const pane = paneId(await runHerdrJson(placeArgs, exec), options.placement);
   const startArgs = [
     "agent",
     "start",
@@ -464,7 +382,7 @@ export async function dispatch(
   const promptArgs = ["agent", "prompt", options.name, prompt];
   if (options.wait) promptArgs.push("--wait", "--timeout", String(timeout));
   try {
-    await runHerdrCommand(startArgs, exec);
+    await startAgent(startArgs, exec);
     await runHerdrCommand(promptArgs, exec);
   } catch (error) {
     await closePane(pane, exec);
@@ -510,6 +428,11 @@ async function main(): Promise<void> {
     )
     .option("--readonly", "disable write tools on the worker CLI", false)
     .option("--direction <direction>", "pane split direction", "right")
+    .option(
+      "--placement <placement>",
+      "tab for a background tab, split to sit beside the caller",
+      "tab"
+    )
     .option("--routes <path>", "routes YAML/JSON path");
   program.parse(process.argv);
   const options = program.opts<DispatchOptions>();
@@ -518,6 +441,9 @@ async function main(): Promise<void> {
   }
   if (options.direction !== "right" && options.direction !== "down") {
     throw new Error("--direction must be right or down");
+  }
+  if (options.placement !== "tab" && options.placement !== "split") {
+    throw new Error("--placement must be tab or split");
   }
   const result = await dispatch(options);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
