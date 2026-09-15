@@ -2,6 +2,12 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
+## 0.9.30 - Herdr becomes the native delegation runtime, and Fable 5.1 becomes the default
+
+Inside Herdr (`HERDR_ENV=1`), `herdr-dispatch.ts` now handles Claude/Codex worker delegation: it routes each semantic role across authenticated CLI profiles, carries recursive delegation depth (default max 3), and keeps pstack's worktree isolation, synthesis, review, and verification behavior. Every skill that dispatches subagents now routes through it, replacing the old SessionStart-forced behavior with a per-workflow opt-in. `/setup-pstack` drives the same routing file (`~/.config/pstack-herdr/routes.yaml`) through a shared parser instead of hand-authored YAML, and each profile can now set a reasoning-effort override that maps to the worker CLI's own flag. Native (non-Herdr) delegation is unchanged.
+
+`plugins/pstack/models.json`'s diverse-model panel and four single-model roles (`bug-fix`, `perf-issue`, `hillclimb`, `strongest judgment`) now default to Fable 5.1 (`claude-fable-5-1`) instead of Fable 5, which stays available for manual choice through `/setup-pstack`. Codex example slugs are unchanged.
+
 ## 0.9.29 - the verify driver and the todolist resolve on Claude Code
 
 Two reports from @Graham3324 (#71, #72), with the isolating experiments that fixed the wording.
