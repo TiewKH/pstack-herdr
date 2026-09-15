@@ -16,7 +16,16 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-const setup = {
+const setup: {
+  profiles: Array<{
+    name: string;
+    kind: string;
+    model: string;
+    config_home: string;
+    effort?: string;
+  }>;
+  roles: Record<string, { profiles: string[]; strategy: string }>;
+} = {
   profiles: [
     {
       name: "claude-strong",
