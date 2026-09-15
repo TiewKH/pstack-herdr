@@ -31,13 +31,13 @@ const setup: {
       name: "claude-strong",
       kind: "claude",
       model: "claude-opus-5",
-      config_home: "~/.claude",
+      config_home: "~/.claude-team",
     },
     {
       name: "claude-fast",
       kind: "claude",
       model: "claude-sonnet-5",
-      config_home: "~/.claude",
+      config_home: "~/.claude-team",
     },
   ],
   roles: {
@@ -74,7 +74,7 @@ describe("herdr deterministic setup", () => {
     const result = buildRoutes(existing, parseSetupInput(JSON.stringify(setup)));
     expect(result.orchestration).toEqual({ max_depth: 7, default_timeout_ms: 90000 });
     expect(result.profiles?.["claude-strong"].env).toEqual({
-      CLAUDE_CONFIG_DIR: "~/.claude",
+      CLAUDE_CONFIG_DIR: "~/.claude-team",
       EXTRA_FLAG: "1",
     });
   });
@@ -92,8 +92,15 @@ describe("herdr deterministic setup", () => {
 
   test("two profiles may share one subscription config home", () => {
     const result = buildRoutes({}, parseSetupInput(JSON.stringify(setup)));
-    expect(result.profiles?.["claude-strong"].env?.CLAUDE_CONFIG_DIR).toBe("~/.claude");
-    expect(result.profiles?.["claude-fast"].env?.CLAUDE_CONFIG_DIR).toBe("~/.claude");
+    expect(result.profiles?.["claude-strong"].env?.CLAUDE_CONFIG_DIR).toBe("~/.claude-team");
+    expect(result.profiles?.["claude-fast"].env?.CLAUDE_CONFIG_DIR).toBe("~/.claude-team");
+  });
+
+  test("a default config home is recorded as given; the dispatcher decides at run time", () => {
+    const defaults = structuredClone(setup);
+    defaults.profiles[0].config_home = "~/.claude";
+    const result = buildRoutes({}, parseSetupInput(JSON.stringify(defaults)));
+    expect(result.profiles?.["claude-strong"].env).toEqual({ CLAUDE_CONFIG_DIR: "~/.claude" });
   });
 
   test("missing required roles fail closed", () => {
