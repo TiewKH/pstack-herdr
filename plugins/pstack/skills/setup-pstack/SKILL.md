@@ -38,7 +38,7 @@ When reconstructing setup JSON from an existing file, set each profile's `config
 
 ### 3. Map and confirm
 
-Show every profile (name, kind, model, config home, extra env) and every role with its current profile pool and strategy. Call out which profiles share a subscription/config home. Mark any model not in the detected set as needing a choice.
+Show every profile (name, kind, model, effort, config home, extra env) and every role with its current profile pool and strategy. Call out which profiles share a subscription/config home. Mark any model not in the detected set as needing a choice.
 
 Ask whether to accept as-is or change specific profiles or roles. Prefer `AskUserQuestion` over free text.
 
@@ -47,6 +47,7 @@ Collect profiles with:
 - a stable profile `name`,
 - `kind`: `claude` or `codex`,
 - optional `model` (use `inherit` when no model should be forced),
+- optional `effort`, a reasoning-effort override passed straight to the worker CLI: `claude --effort <level>` (`low`, `medium`, `high`, `xhigh`, `max`) or `codex -c model_reasoning_effort="<level>"` (`minimal`, `low`, `medium`, `high`, `xhigh`). Leave unset to run the CLI's own default. Effort is a separate axis from model — offer it as its own question rather than folding it into the model choice,
 - optional `config_home`,
 - optional extra `env` entries.
 
@@ -77,6 +78,7 @@ Create a temporary JSON file shaped exactly like this (a committed copy lives at
       "name": "claude-strong",
       "kind": "claude",
       "model": "<confirmed-strong-model>",
+      "effort": "high",
       "config_home": "~/.claude"
     },
     {
@@ -150,6 +152,7 @@ Tell the user:
 - which profiles share the same subscription/config home,
 - which role maps to which profile pool,
 - which profiles force a model and which inherit,
+- which profiles set an effort override and which run the CLI's own default,
 - and that the routes take effect for pstack delegation while running inside Herdr.
 
 If the user also wants native non-Herdr sessions configured, continue with **Native setup**.

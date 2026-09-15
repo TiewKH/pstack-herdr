@@ -70,6 +70,17 @@ describe("herdr deterministic setup", () => {
     });
   });
 
+  test("effort is optional and carried through to rendered YAML", () => {
+    const withEffort = structuredClone(setup);
+    withEffort.profiles[0].effort = "high";
+    const config = buildRoutes({}, parseSetupInput(JSON.stringify(withEffort)));
+    expect(config.profiles?.["claude-strong"].effort).toBe("high");
+    expect(config.profiles?.["claude-fast"].effort).toBeUndefined();
+    const yaml = renderRoutesYaml(config);
+    expect(yaml).toContain('    effort: "high"');
+    expect(parseRoutes(yaml)).toEqual(config);
+  });
+
   test("two profiles may share one subscription config home", () => {
     const result = buildRoutes({}, parseSetupInput(JSON.stringify(setup)));
     expect(result.profiles?.["claude-strong"].env?.CLAUDE_CONFIG_DIR).toBe("~/.claude");

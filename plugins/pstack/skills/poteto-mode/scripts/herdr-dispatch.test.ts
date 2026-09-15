@@ -7,6 +7,7 @@ import {
   agentStatus,
   applyReadonlyPrompt,
   dispatch,
+  effortAgentArgs,
   envFlags,
   inferParentKind,
   isPaneNotReady,
@@ -143,6 +144,15 @@ describe("herdr-dispatch contracts", () => {
     expect(readonlyAgentArgs("codex")).toEqual(["--sandbox", "read-only"]);
     expect(applyReadonlyPrompt("do the work", true).startsWith("Read-only worker.")).toBe(true);
     expect(applyReadonlyPrompt("do the work", false)).toBe("do the work");
+  });
+
+  test("effort args translate to each CLI's own flag shape", () => {
+    expect(effortAgentArgs("claude", "max")).toEqual(["--effort", "max"]);
+    expect(effortAgentArgs("codex", "high")).toEqual([
+      "-c",
+      'model_reasoning_effort="high"',
+    ]);
+    expect(effortAgentArgs("claude", undefined)).toEqual([]);
   });
 
   test("env flags keep key and value as one argv pair", () => {
@@ -306,6 +316,21 @@ describe("herdr-dispatch Herdr sequence", () => {
     expect(prompt).toContain("--wait");
     expect(prompt).toContain("45000");
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("--effort override reaches agent start's trailing CLI args", async () => {
+    const { calls, exec } = scriptedExec({
+      "pane split": splitOk,
+      "agent start": startOk,
+      "agent prompt": promptOk,
+    });
+    await dispatch({ ...options, effort: "max" }, herdrEnv, exec);
+    const start = calls.find((args) => commandKey(args) === "agent start");
+    if (!start) throw new Error("expected agent start");
+    const dash = start.indexOf("--");
+    expect(dash).toBeGreaterThan(-1);
+    expect(start.slice(dash)).toContain("--effort");
+    expect(start[start.indexOf("--effort") + 1]).toBe("max");
   });
 
   test("tab placement keeps the worker off the caller's screen", async () => {

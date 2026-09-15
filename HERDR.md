@@ -34,7 +34,7 @@ Start the main coordinator inside Herdr so `HERDR_ENV=1` is present, then enter 
 
 ## Routing and subscriptions
 
-Copy `config/routes.example.yaml` to `~/.config/pstack-herdr/routes.yaml` for explicit routing. Profiles may set `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. Role `strategy` is `spread` (stable hash over the pool) or `first` (the first listed profile). A single authenticated profile may back multiple worker processes; separate subscriptions/accounts use separately authenticated config homes. Caller-owned `--cwd` is the isolation boundary.
+Copy `config/routes.example.yaml` to `~/.config/pstack-herdr/routes.yaml` for explicit routing. Profiles may set `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. An optional profile `effort` sets reasoning effort independently of model: `--effort <level>` for Claude workers, `-c model_reasoning_effort="<level>"` for Codex workers; omit it to run the worker CLI's own default. Role `strategy` is `spread` (stable hash over the pool) or `first` (the first listed profile). A single authenticated profile may back multiple worker processes; separate subscriptions/accounts use separately authenticated config homes. Caller-owned `--cwd` is the isolation boundary.
 
 Roles are `explorer`, `implementation`, `difficult-implementation`, `judgment`, `reviewer`, `arena-candidate`, `arena-judge`, `verifier`, and `subcoordinator`.
 
