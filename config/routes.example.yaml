@@ -10,8 +10,9 @@ profiles:
     # Optional, independent of model. claude: low/medium/high/xhigh/max.
     # codex: minimal/low/medium/high/xhigh. Omit to run the CLI's own default.
     effort: high
-    env:
-      CLAUDE_CONFIG_DIR: ~/.claude
+    # No env: the CLI's default home is not an override. CLAUDE_CONFIG_DIR moves
+    # Claude's onboarding state, so a worker given ~/.claude boots into first-run
+    # onboarding; the dispatcher drops such a value at run time.
 
   # Add extra profiles only for separately authenticated CLI homes.
   # Multiple workers may share one profile/subscription.

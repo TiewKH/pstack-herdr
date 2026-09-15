@@ -34,7 +34,7 @@ Multiple profiles may share the same config home. This is how one Claude or Code
 
 If `~/.config/pstack-herdr/routes.yaml` already exists, read it and treat its profiles, roles, strategies, models, config homes, extra env, and orchestration as the current choices. Do not rewrite it by hand; reading is the load step. If the file is missing or empty, start from the detected runtimes and the example shape in step 4. If the file exists but does not parse, stop and show the error instead of guessing.
 
-When reconstructing setup JSON from an existing file, set each profile's `config_home` from `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, and keep any other `env` entries. Omit `orchestration` from the JSON unless the user is changing it, so the writer preserves the current values.
+When reconstructing setup JSON from an existing file, set each profile's `config_home` from `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, and keep any other `env` entries. Leave `config_home` out for the CLI's default home (`~/.claude`, `~/.codex`). Claude Code keeps its onboarding state under `$CLAUDE_CONFIG_DIR`, so a worker given the default home boots into first-run onboarding; the dispatcher ignores such a value at run time. Omit `orchestration` from the JSON unless the user is changing it, so the writer preserves the current values.
 
 ### 3. Map and confirm
 
@@ -78,14 +78,12 @@ Create a temporary JSON file shaped exactly like this (a committed copy lives at
       "name": "claude-strong",
       "kind": "claude",
       "model": "<confirmed-strong-model>",
-      "effort": "high",
-      "config_home": "~/.claude"
+      "effort": "high"
     },
     {
       "name": "claude-fast",
       "kind": "claude",
-      "model": "<confirmed-fast-model>",
-      "config_home": "~/.claude"
+      "model": "<confirmed-fast-model>"
     }
   ],
   "roles": {

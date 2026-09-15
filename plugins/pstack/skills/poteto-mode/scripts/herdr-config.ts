@@ -50,11 +50,22 @@ export interface SetupRoutes {
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+export const CONFIG_HOMES: Record<
+  AgentKind,
+  { key: "CLAUDE_CONFIG_DIR" | "CODEX_HOME"; defaultDir: string }
+> = {
+  claude: { key: "CLAUDE_CONFIG_DIR", defaultDir: ".claude" },
+  codex: { key: "CODEX_HOME", defaultDir: ".codex" },
+};
 
-export function expandHome(value: string): string {
-  if (value === "~") return homedir();
-  if (value.startsWith("~/")) return resolve(homedir(), value.slice(2));
+export function expandHome(value: string, home: string = homedir()): string {
+  if (value === "~") return home;
+  if (value.startsWith("~/")) return resolve(home, value.slice(2));
   return value;
+}
+
+export function isDefaultConfigHome(kind: AgentKind, value: string, home: string = homedir()): boolean {
+  return resolve(expandHome(value, home)) === resolve(home, CONFIG_HOMES[kind].defaultDir);
 }
 
 function asObject(value: unknown, label: string): Record<string, unknown> {
@@ -89,19 +100,6 @@ function parseStrategy(value: unknown, label: string): RouteStrategy {
   if (value === undefined) return "first";
   if (value === "spread" || value === "first") return value;
   throw new Error(`${label} must be spread or first`);
-}
-
-function configHomeEnvKey(kind: AgentKind): "CLAUDE_CONFIG_DIR" | "CODEX_HOME" {
-  switch (kind) {
-    case "claude":
-      return "CLAUDE_CONFIG_DIR";
-    case "codex":
-      return "CODEX_HOME";
-    default: {
-      const exhaustive: never = kind;
-      throw new Error(`unhandled agent kind: ${String(exhaustive)}`);
-    }
-  }
 }
 
 function parseEnvMap(raw: unknown, label: string): Record<string, string> {
@@ -272,7 +270,7 @@ function applyConfigHomes(
     const profile = next[name];
     next[name] = {
       ...profile,
-      env: { ...profile.env, [configHomeEnvKey(profile.kind)]: home },
+      env: { ...profile.env, [CONFIG_HOMES[profile.kind].key]: home },
     };
   }
   return next;

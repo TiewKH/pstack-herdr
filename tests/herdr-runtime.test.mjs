@@ -41,6 +41,16 @@ const playbooks = [
 if (hook.includes("pstack:herdr-runtime") || hook.includes("HERDR_ENV=1")) {
   throw new Error("session-start hook must not own Herdr delegation");
 }
+const hooks = JSON.parse(read("plugins/pstack/hooks/hooks.json")).hooks;
+const agentGate = (hooks.PreToolUse ?? []).find(
+  (group) =>
+    group.matcher === "Agent" &&
+    group.hooks.some((h) => h.command.includes("hooks/herdr-agent-gate.sh"))
+);
+if (!agentGate) throw new Error("hooks.json must gate the Agent tool with herdr-agent-gate.sh");
+if (!mapping.includes("herdr-agent-gate.sh") || !mapping.includes("PSTACK_HERDR_ALLOW_NATIVE_AGENT")) {
+  throw new Error("Herdr mapping does not document the Agent gate and its bypass");
+}
 if (!mapping.includes("herdr-dispatch.ts")) throw new Error("Herdr mapping does not point to dispatcher");
 if (!mapping.includes("| `how` |") || !mapping.includes("| Feature / bug-fix")) {
   throw new Error("Herdr mapping is missing per-skill notes");

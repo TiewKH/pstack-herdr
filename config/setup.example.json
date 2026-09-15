@@ -4,14 +4,12 @@
       "name": "claude-strong",
       "kind": "claude",
       "model": "claude-opus-5",
-      "effort": "high",
-      "config_home": "~/.claude"
+      "effort": "high"
     },
     {
       "name": "claude-fast",
       "kind": "claude",
-      "model": "claude-sonnet-5",
-      "config_home": "~/.claude"
+      "model": "claude-sonnet-5"
     }
   ],
   "roles": {

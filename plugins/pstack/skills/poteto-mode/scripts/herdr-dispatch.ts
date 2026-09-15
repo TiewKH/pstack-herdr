@@ -1,10 +1,13 @@
 #!/usr/bin/env bun
 
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { ensureDependenciesInstalled } from "./bootstrap.ts";
 import {
+  CONFIG_HOMES,
   expandHome,
+  isDefaultConfigHome,
   loadRoutes,
   type AgentKind,
   type Profile,
@@ -57,6 +60,30 @@ export interface CommandResult {
 
 export type HerdrExec = (args: string[]) => Promise<CommandResult>;
 
+export class HerdrError extends Error {
+  readonly command: string;
+  readonly code: string | undefined;
+
+  constructor(command: string, detail: string, code: string | undefined) {
+    super(`herdr ${command} failed: ${detail}`);
+    this.name = "HerdrError";
+    this.command = command;
+    this.code = code;
+  }
+}
+
+export interface DispatchPlan {
+  profile: string;
+  kind: AgentKind;
+  depth: number;
+  timeout: number;
+  startTimeout: number;
+  deliveryWindow: number;
+  prompt: string;
+  placeArgs: string[];
+  startTail: string[];
+}
+
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 // A freshly split pane needs a moment to reach its interactive shell prompt, and
@@ -67,6 +94,16 @@ const SHELL_READY_POLL_MS = 250;
 const PANE_NOT_READY = /agent_pane_busy|not an available shell/;
 const READONLY_PREFIX =
   "Read-only worker. Do not write files, commit, or mutate the workspace.\n\n";
+const SCREEN_LINES = 24;
+// `herdr agent start` rejects a larger timeout outright; the wait budget is not capped.
+const START_TIMEOUT_MAX_MS = 300000;
+// A prompt typed into a CLI that is still starting is lost, and Herdr's own `--wait`
+// then matches the startup turn's completion over an empty composer. So the dispatcher
+// waits for idle before typing and counts the prompt delivered once the agent leaves idle.
+const DELIVERY_WINDOW_MS = 8000;
+const DELIVERY_POLL_MS = 500;
+const PROMPT_ATTEMPTS = 2;
+const LONG_ARG_CHARS = 120;
 
 function asObject(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -169,6 +206,25 @@ export function applyReadonlyPrompt(prompt: string, readonly: boolean): string {
   return readonly ? `${READONLY_PREFIX}${prompt}` : prompt;
 }
 
+// Claude Code moves its onboarding state to `$CLAUDE_CONFIG_DIR/.claude.json` once the
+// variable is set, so a worker given the default home boots into first-run onboarding.
+// The default is dropped only when the pane would inherit it anyway; an ambient value
+// naming another account must still be overridden.
+export function workerEnv(
+  kind: AgentKind,
+  profileEnv: Record<string, string> = {},
+  home: string = homedir(),
+  ambient: NodeJS.ProcessEnv = process.env
+): Record<string, string> {
+  const env = { ...profileEnv };
+  const { key } = CONFIG_HOMES[kind];
+  const value = env[key];
+  if (value === undefined || !isDefaultConfigHome(kind, value, home)) return env;
+  const inherited = ambient[key];
+  if (inherited === undefined || isDefaultConfigHome(kind, inherited, home)) delete env[key];
+  return env;
+}
+
 export function effortAgentArgs(kind: AgentKind, effort: string | undefined): string[] {
   if (!effort) return [];
   switch (kind) {
@@ -205,6 +261,20 @@ async function spawnHerdr(args: string[]): Promise<CommandResult> {
   return { stdout, stderr, exitCode };
 }
 
+// A prompt body can run to kilobytes; the error names its size, not its text.
+function argSummary(args: string[]): string {
+  return args.map((arg) => (arg.length > LONG_ARG_CHARS ? `<${arg.length} chars>` : arg)).join(" ");
+}
+
+function herdrErrorCode(detail: string): string | undefined {
+  try {
+    const error = asObject(asObject(JSON.parse(detail), "herdr error").error, "error");
+    return typeof error.code === "string" ? error.code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function runHerdrCommand(
   args: string[],
   exec: HerdrExec = spawnHerdr
@@ -212,7 +282,7 @@ async function runHerdrCommand(
   const result = await exec(args);
   if (result.exitCode !== 0) {
     const detail = result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`;
-    throw new Error(`herdr ${args.join(" ")} failed: ${detail}`);
+    throw new HerdrError(argSummary(args), detail, herdrErrorCode(detail));
   }
   return result;
 }
@@ -225,7 +295,7 @@ async function runHerdrJson(args: string[], exec: HerdrExec = spawnHerdr): Promi
     return JSON.parse(text);
   } catch (error) {
     throw new Error(
-      `herdr ${args.join(" ")} returned non-JSON output where JSON was expected: ${text}`,
+      `herdr ${argSummary(args)} returned non-JSON output where JSON was expected: ${text}`,
       { cause: error }
     );
   }
@@ -332,8 +402,71 @@ export function placementArgs(
   }
 }
 
+// Everything the dispatch needs to know before it talks to Herdr.
+export function planDispatch(
+  options: DispatchOptions,
+  env: NodeJS.ProcessEnv = process.env
+): DispatchPlan {
+  if (env.HERDR_ENV !== "1") throw new Error("herdr-dispatch requires HERDR_ENV=1");
+  if (!AGENT_NAME.test(options.name)) throw new Error("--name must match [a-z][a-z0-9_-]{0,31}");
+  const config = loadRoutes(options.routes, env);
+  const chosen = chooseProfile(config, options, env);
+  const nesting = depth(config, env);
+  const timeout =
+    optionalNonNegativeInt(options.timeout, "--timeout") ??
+    config.orchestration?.default_timeout_ms ??
+    180000;
+  const kind = chosen.profile.kind;
+  const childEnv = {
+    ...workerEnv(kind, chosen.profile.env, homedir(), env),
+    PSTACK_HERDR_DEPTH: String(nesting.next),
+    PSTACK_HERDR_PARENT_KIND: kind,
+  };
+  return {
+    profile: chosen.name,
+    kind,
+    depth: nesting.next,
+    timeout,
+    startTimeout: Math.min(timeout, START_TIMEOUT_MAX_MS),
+    deliveryWindow: parseNonNegativeInt(
+      env.PSTACK_HERDR_DELIVERY_WINDOW_MS,
+      DELIVERY_WINDOW_MS,
+      "PSTACK_HERDR_DELIVERY_WINDOW_MS"
+    ),
+    prompt: applyReadonlyPrompt(resolvedPrompt(options), options.readonly),
+    placeArgs: placementArgs(options, resolve(options.cwd), envFlags(childEnv)),
+    startTail: agentStartTail(
+      kind,
+      options.model ?? chosen.profile.model,
+      options.effort ?? chosen.profile.effort,
+      options.readonly
+    ),
+  };
+}
+
+function startArgs(name: string, pane: string, plan: DispatchPlan): string[] {
+  return [
+    "agent",
+    "start",
+    name,
+    "--kind",
+    plan.kind,
+    "--pane",
+    pane,
+    "--timeout",
+    String(plan.startTimeout),
+    ...plan.startTail,
+  ];
+}
+
 export function isPaneNotReady(message: string): boolean {
   return PANE_NOT_READY.test(message);
+}
+
+// `agent wait` reports `timeout` when the caller's budget runs out; the worker is
+// still running and its pane must stay open.
+export function isWaitTimeout(error: unknown): boolean {
+  return error instanceof HerdrError && error.code === "timeout";
 }
 
 function sleep(ms: number): Promise<void> {
@@ -358,8 +491,68 @@ async function closePane(pane: string, exec: HerdrExec): Promise<void> {
   try {
     await runHerdrCommand(["pane", "close", pane], exec);
   } catch {
-    // Keep the original start/prompt error; a failed cleanup must not replace it.
+    // Keep the original error; a failed cleanup must not replace it.
   }
+}
+
+async function visibleScreen(name: string, exec: HerdrExec): Promise<string> {
+  try {
+    return await runHerdrText(
+      ["agent", "read", name, "--source", "visible", "--lines", String(SCREEN_LINES)],
+      exec
+    );
+  } catch {
+    return "";
+  }
+}
+
+async function settleBeforePrompt(name: string, timeout: number, exec: HerdrExec): Promise<void> {
+  try {
+    await runHerdrCommand(
+      ["agent", "wait", name, "--until", "idle", "--until", "blocked", "--timeout", String(timeout)],
+      exec
+    );
+  } catch {
+    // A start that never reports idle still gets the prompt; Herdr reports its own errors then.
+  }
+}
+
+async function leftIdle(name: string, windowMs: number, exec: HerdrExec): Promise<boolean> {
+  const deadline = Date.now() + windowMs;
+  for (;;) {
+    const status = agentStatus(await runHerdrJson(["agent", "get", name], exec));
+    if (status === "working" || status === "blocked" || status === "done") return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(DELIVERY_POLL_MS);
+  }
+}
+
+async function deliverPrompt(
+  name: string,
+  prompt: string,
+  windowMs: number,
+  exec: HerdrExec
+): Promise<void> {
+  for (let attempt = 1; attempt <= PROMPT_ATTEMPTS; attempt += 1) {
+    await runHerdrCommand(["agent", "prompt", name, prompt], exec);
+    if (await leftIdle(name, windowMs, exec)) return;
+  }
+  throw new Error(
+    `prompt to ${name} was not delivered after ${PROMPT_ATTEMPTS} attempts: the agent never left idle`
+  );
+}
+
+// A failure to read the worker's own state leaves its pane open for inspection.
+function leavesPaneOpen(error: unknown): boolean {
+  return error instanceof HerdrError && error.command.startsWith("agent get ");
+}
+
+function withScreen(error: unknown, screen: string): Error {
+  const base = error instanceof Error ? error : new Error(String(error));
+  if (!screen.trim()) return base;
+  return new Error(`${base.message}\nworker screen before the pane closed:\n${screen}`, {
+    cause: base,
+  });
 }
 
 export async function dispatch(
@@ -367,62 +560,40 @@ export async function dispatch(
   env: NodeJS.ProcessEnv = process.env,
   exec: HerdrExec = spawnHerdr
 ): Promise<DispatchResult> {
-  if (env.HERDR_ENV !== "1") throw new Error("herdr-dispatch requires HERDR_ENV=1");
-  if (!AGENT_NAME.test(options.name)) throw new Error("--name must match [a-z][a-z0-9_-]{0,31}");
-  const config = loadRoutes(options.routes, env);
-  const chosen = chooseProfile(config, options, env);
-  const nesting = depth(config, env);
-  const timeout =
-    optionalNonNegativeInt(options.timeout, "--timeout") ??
-    config.orchestration?.default_timeout_ms ??
-    180000;
-  const prompt = applyReadonlyPrompt(resolvedPrompt(options), options.readonly);
-  const childEnv = {
-    ...(chosen.profile.env ?? {}),
-    PSTACK_HERDR_DEPTH: String(nesting.next),
-    PSTACK_HERDR_PARENT_KIND: chosen.profile.kind,
-  };
-  const placeArgs = placementArgs(options, resolve(options.cwd), envFlags(childEnv));
-  const pane = paneId(await runHerdrJson(placeArgs, exec), options.placement);
-  const startArgs = [
-    "agent",
-    "start",
-    options.name,
-    "--kind",
-    chosen.profile.kind,
-    "--pane",
-    pane,
-    "--timeout",
-    String(timeout),
-    ...agentStartTail(
-      chosen.profile.kind,
-      options.model ?? chosen.profile.model,
-      options.effort ?? chosen.profile.effort,
-      options.readonly
-    ),
-  ];
-  const promptArgs = ["agent", "prompt", options.name, prompt];
-  if (options.wait) promptArgs.push("--wait", "--timeout", String(timeout));
+  const plan = planDispatch(options, env);
+  const pane = paneId(await runHerdrJson(plan.placeArgs, exec), options.placement);
   try {
-    await startAgent(startArgs, exec);
-    await runHerdrCommand(promptArgs, exec);
+    await startAgent(startArgs(options.name, pane, plan), exec);
+    await settleBeforePrompt(options.name, plan.startTimeout, exec);
+    await deliverPrompt(options.name, plan.prompt, plan.deliveryWindow, exec);
   } catch (error) {
+    if (leavesPaneOpen(error)) throw error;
+    const screen = await visibleScreen(options.name, exec);
     await closePane(pane, exec);
-    throw error;
+    throw withScreen(error, screen);
   }
   const handle: DispatchHandle = {
     agent: options.name,
     pane,
-    profile: chosen.name,
-    kind: chosen.profile.kind,
-    depth: nesting.next,
+    profile: plan.profile,
+    kind: plan.kind,
+    depth: plan.depth,
   };
   if (!options.wait) return handle;
+  try {
+    await runHerdrCommand(["agent", "wait", options.name, "--timeout", String(plan.timeout)], exec);
+  } catch (error) {
+    if (!isWaitTimeout(error)) throw error;
+  }
   const status = agentStatus(await runHerdrJson(["agent", "get", options.name], exec));
-  const output = await runHerdrText(
-    ["agent", "read", options.name, "--source", "recent-unwrapped", "--lines", "240"],
-    exec
-  );
+  // Herdr refuses an unwrapped read while the agent is working; the screen is all there is.
+  const output =
+    status === "working"
+      ? await visibleScreen(options.name, exec)
+      : await runHerdrText(
+          ["agent", "read", options.name, "--source", "recent-unwrapped", "--lines", "240"],
+          exec
+        );
   return { ...handle, status, blocked: status === "blocked", output };
 }
 
