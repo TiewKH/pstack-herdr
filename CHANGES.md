@@ -2,6 +2,10 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
+## 0.9.30 - Fable 5.1 replaces Fable 5 as the default
+
+`plugins/pstack/models.json`'s diverse-model panel and four single-model roles (`bug-fix`, `perf-issue`, `hillclimb`, `strongest judgment`) now default to Fable 5.1 (`claude-fable-5-1`) instead of Fable 5. Fable 5 stays in `available` for manual choice through `/setup-pstack`. The five derived Models sections (`poteto-mode`, `arena`, `architect`, `interrogate`, `setup-pstack`) regenerate from the same run. The Codex example slugs are unchanged.
+
 ## 0.9.29 - the verify driver and the todolist resolve on Claude Code
 
 Two reports from @Graham3324 (#71, #72), with the isolating experiments that fixed the wording.
