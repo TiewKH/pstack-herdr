@@ -7,6 +7,9 @@ profiles:
   claude-main:
     kind: claude
     model: inherit
+    # Optional, independent of model. claude: low/medium/high/xhigh/max.
+    # codex: minimal/low/medium/high/xhigh. Omit to run the CLI's own default.
+    effort: high
     env:
       CLAUDE_CONFIG_DIR: ~/.claude
 

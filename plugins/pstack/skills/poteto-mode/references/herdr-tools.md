@@ -14,6 +14,7 @@ The dispatcher calls the installed `herdr` binary itself and owns pane creation,
 | Dispatch N parallel subagents in one turn | N dispatcher processes launched concurrently, then collect results |
 | `subagent_type` | ignored; pass the semantic pstack `--role` |
 | `model` | omit unless overriding; `--role` selects a profile from `~/.config/pstack-herdr/routes.yaml` |
+| reasoning effort (no Claude `Agent`/`Task` equivalent) | omit unless overriding; a routed profile's `effort` becomes `--effort <level>` for Claude workers or `-c model_reasoning_effort="<level>"` for Codex workers |
 | `readonly: true` | `--readonly` |
 | `readonly: false` because Claude Ask mode strips MCP | still pass `--readonly`; it disables write tools and does not use Ask/plan mode |
 | `isolation: "worktree"` / exclusive branch | caller creates the worktree or branch, then passes it as `--cwd` |
@@ -33,7 +34,7 @@ bun <poteto-mode>/scripts/herdr-dispatch.ts \
 
 `--readonly` prepends a no-write constraint to the prompt and passes Claude `--disallowedTools Write,Edit` or Codex `--sandbox read-only`. The brief must still prohibit writes.
 
-Use `--profile`, `--kind`, or `--model` only to override routing deliberately.
+Use `--profile`, `--kind`, `--model`, or `--effort` only to override routing deliberately.
 
 For parallel fan-out, launch dispatcher processes concurrently rather than dispatching one and waiting before starting the next. Each dispatcher creates its own Herdr pane and agent. Collect each JSON result after all launches have begun.
 

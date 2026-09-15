@@ -22,6 +22,7 @@ export interface DispatchOptions {
   profile?: string;
   kind?: AgentKind;
   model?: string;
+  effort?: string;
   wait: boolean;
   timeout?: number;
   readonly: boolean;
@@ -168,13 +169,29 @@ export function applyReadonlyPrompt(prompt: string, readonly: boolean): string {
   return readonly ? `${READONLY_PREFIX}${prompt}` : prompt;
 }
 
+export function effortAgentArgs(kind: AgentKind, effort: string | undefined): string[] {
+  if (!effort) return [];
+  switch (kind) {
+    case "claude":
+      return ["--effort", effort];
+    case "codex":
+      return ["-c", `model_reasoning_effort="${effort}"`];
+    default: {
+      const exhaustive: never = kind;
+      throw new Error(`unhandled agent kind: ${String(exhaustive)}`);
+    }
+  }
+}
+
 function agentStartTail(
   kind: AgentKind,
   model: string | undefined,
+  effort: string | undefined,
   readonly: boolean
 ): string[] {
   const args = readonly ? readonlyAgentArgs(kind) : [];
   if (model && model !== "inherit" && model !== "auto") args.push("--model", model);
+  args.push(...effortAgentArgs(kind, effort));
   return args.length === 0 ? [] : ["--", ...args];
 }
 
@@ -377,7 +394,12 @@ export async function dispatch(
     pane,
     "--timeout",
     String(timeout),
-    ...agentStartTail(chosen.profile.kind, options.model ?? chosen.profile.model, options.readonly),
+    ...agentStartTail(
+      chosen.profile.kind,
+      options.model ?? chosen.profile.model,
+      options.effort ?? chosen.profile.effort,
+      options.readonly
+    ),
   ];
   const promptArgs = ["agent", "prompt", options.name, prompt];
   if (options.wait) promptArgs.push("--wait", "--timeout", String(timeout));
@@ -417,6 +439,7 @@ async function main(): Promise<void> {
     .option("--profile <name>", "force a configured route profile")
     .option("--kind <kind>", "fallback agent kind, claude or codex")
     .option("--model <slug>", "override model passed to the worker CLI")
+    .option("--effort <level>", "override reasoning effort passed to the worker CLI")
     .option("--wait", "wait for settled worker state and read output", false)
     .option(
       "--timeout <ms>",

@@ -15,6 +15,7 @@ export type RouteStrategy = "spread" | "first";
 export interface Profile {
   kind: AgentKind;
   model?: string;
+  effort?: string;
   env?: Record<string, string>;
 }
 
@@ -120,6 +121,8 @@ function parseProfile(raw: unknown, label: string): Profile {
   const parsed: Profile = { kind: parseAgentKind(profile.kind, `${label}.kind`) };
   const model = optionalString(profile.model, `${label}.model`);
   if (model) parsed.model = model;
+  const effort = optionalString(profile.effort, `${label}.effort`);
+  if (effort) parsed.effort = effort;
   if (profile.env !== undefined) parsed.env = parseEnvMap(profile.env, `${label}.env`);
   return parsed;
 }
@@ -337,6 +340,7 @@ export function buildRoutes(existing: RoutesConfig, input: SetupRoutes): RoutesC
     profiles[name] = {
       kind: item.kind,
       model: item.model ?? "inherit",
+      ...(item.effort ? { effort: item.effort } : {}),
       ...(Object.keys(env).length > 0 ? { env } : {}),
     };
   }
@@ -385,6 +389,7 @@ export function renderRoutesYaml(config: RoutesConfig): string {
     const profile = profiles[name];
     lines.push(`  ${name}:`, `    kind: ${profile.kind}`);
     if (profile.model !== undefined) lines.push(`    model: ${quote(profile.model)}`);
+    if (profile.effort !== undefined) lines.push(`    effort: ${quote(profile.effort)}`);
     const env = profile.env ?? {};
     if (Object.keys(env).length > 0) {
       lines.push("    env:");
