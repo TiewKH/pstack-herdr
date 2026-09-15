@@ -2,17 +2,11 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
-## 0.9.30 - the Herdr delegation runtime lands, and Fable 5.1 becomes the default Fable model
+## 0.9.30 - Herdr becomes the native delegation runtime, and Fable 5.1 becomes the default
 
-Four merged PRs join this release.
+Inside Herdr (`HERDR_ENV=1`), `herdr-dispatch.ts` now handles Claude/Codex worker delegation: it routes each semantic role across authenticated CLI profiles, carries recursive delegation depth (default max 3), and keeps pstack's worktree isolation, synthesis, review, and verification behavior. Every skill that dispatches subagents now routes through it, replacing the old SessionStart-forced behavior with a per-workflow opt-in. `/setup-pstack` drives the same routing file (`~/.config/pstack-herdr/routes.yaml`) through a shared parser instead of hand-authored YAML, and each profile can now set a reasoning-effort override that maps to the worker CLI's own flag. Native (non-Herdr) delegation is unchanged.
 
-`herdr-dispatch.ts` becomes the executable Claude/Codex worker boundary whenever `HERDR_ENV=1` (#1). It routes semantic-role delegation across one or more authenticated CLI profiles, propagates recursive depth (default max 3), and keeps pstack's worktree isolation, synthesis, review, and verification behavior. Native Claude/Codex delegation outside Herdr stays as it was. SessionStart no longer forces Herdr behavior; each workflow opts in structurally instead. How, Why, Arena, Swarm, Interrogate, Reflect, Feature, Bug fix, Refactoring, Perf issue, Hillclimb, Eval, Multi-phase planning, Autonomous run, Orchestrate, Autopilot-full, and Autopilot-stack now route through the dispatcher, with contract tests that fail if a migrated path loses dispatcher integration.
-
-`/setup-pstack` becomes Herdr-aware (#2). Inside Herdr it gathers choices, writes a temp JSON file, and drives `~/.config/pstack-herdr/routes.yaml` through `configure-herdr.ts` and a `herdr-config.ts` parser shared with the dispatcher; it never hand-authors YAML. Reconfiguring loads the existing routes file, shows current profiles and roles, and asks accept-as-is versus change before rewriting. Every skill that issues its own `Agent`/`Task` call now points at `herdr-tools.md`; playbooks inherit the mapping from `poteto-mode` and must not grow inline Herdr dual paths.
-
-Herdr routing profiles gain an optional `effort` field, independent of `model` (#3). `herdr-dispatch.ts` turns it into each worker's own flag: `--effort <level>` for Claude, `-c model_reasoning_effort="<level>"` for Codex. `/setup-pstack`'s Herdr path now asks about effort per profile and shows it during confirm and summary. Native (non-Herdr) setup stays as it was, since the `Agent` tool has no effort parameter yet. A follow-up fix (#4) types the setup test fixture so the new `effort` field typechecks; CI's typecheck job had failed on `main` once #3 landed with an untyped fixture object.
-
-`plugins/pstack/models.json`'s diverse-model panel and four single-model roles (`bug-fix`, `perf-issue`, `hillclimb`, `strongest judgment`) now default to Fable 5.1 (`claude-fable-5-1`) instead of Fable 5. Fable 5 stays in `available` for manual choice through `/setup-pstack`. The five derived Models sections (`poteto-mode`, `arena`, `architect`, `interrogate`, `setup-pstack`) regenerate from the same run. The Codex example slugs are unchanged.
+`plugins/pstack/models.json`'s diverse-model panel and four single-model roles (`bug-fix`, `perf-issue`, `hillclimb`, `strongest judgment`) now default to Fable 5.1 (`claude-fable-5-1`) instead of Fable 5, which stays available for manual choice through `/setup-pstack`. Codex example slugs are unchanged.
 
 ## 0.9.29 - the verify driver and the todolist resolve on Claude Code
 
