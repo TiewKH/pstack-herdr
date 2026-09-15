@@ -52,7 +52,8 @@ The design goals are:
 | Layer | Responsibility |
 | --- | --- |
 | **pstack** | decomposition, semantic roles, playbooks, worktree/isolation policy, synthesis, review, verification |
-| **`herdr-dispatch.ts`** | pane creation, profile environment, CLI startup, prompt delivery, lifecycle waiting, output reads, recursive depth |
+| **`herdr-dispatch.ts`** | pane creation, profile environment, CLI startup, prompt delivery and its confirmation, lifecycle waiting, output reads, recursive depth |
+| **`hooks/herdr-agent-gate.sh`** | on Claude Code, denies the native `Agent` tool while `HERDR_ENV=1` and points at the dispatcher |
 | **Herdr** | terminal panes, agent lifecycle/status, visibility, interaction |
 | **Claude Code / Codex** | execution of delegated work |
 
@@ -188,10 +189,12 @@ mkdir -p ~/.config/pstack-herdr
 cp config/routes.example.yaml ~/.config/pstack-herdr/routes.yaml
 ```
 
-Profiles can provide runtime-specific config homes:
+Profiles can provide runtime-specific config homes for separately authenticated accounts:
 
 - Claude Code: `CLAUDE_CONFIG_DIR`
 - Codex: `CODEX_HOME`
+
+Leave the CLI's default home (`~/.claude`, `~/.codex`) out. Claude Code keeps its onboarding state under `$CLAUDE_CONFIG_DIR` once the variable is set, so a worker given the default home boots into first-run onboarding and never reads its prompt. The dispatcher drops a default home it finds in a routes file unless the shell that started Herdr exports a different account for that variable.
 
 ### One subscription, multiple workers
 
@@ -223,9 +226,13 @@ bun <poteto-mode>/scripts/herdr-dispatch.ts \
   --wait
 ```
 
-`--timeout` / `orchestration.default_timeout_ms` supplies the budget for Herdr agent startup and prompt waiting.
+`--timeout` / `orchestration.default_timeout_ms` supplies the budget for Herdr agent startup (at most the 300000 ms Herdr accepts) and for the wait after the prompt. The dispatcher waits for the worker to report idle before typing, then counts the prompt delivered once the agent leaves idle, retrying once. A prompt that never lands is an error carrying the worker's last screen, and so is a rejected prompt; both close the pane.
 
-For parallel fan-out, launch all dispatcher processes before waiting. A Herdr state of `blocked` is not completion; inspect the worker for an approval or question. `unknown` likewise must not be treated as successful completion.
+For parallel fan-out, launch all dispatcher processes before waiting. A Herdr state of `blocked` is not completion; inspect the worker for an approval or question. `unknown` likewise must not be treated as successful completion. `working` means the wait budget ran out with the worker still running; the pane stays open, so poll it with `herdr agent wait <name>`.
+
+### The Agent gate
+
+On Claude Code the plugin registers a `PreToolUse` hook on `Agent`. Inside Herdr, with `herdr`, `bun`, and the dispatcher present, it denies the native call and returns the dispatcher command, so the mapping in `herdr-tools.md` is enforced rather than remembered. If `herdr` or `bun` is missing it allows the call and names what to install; outside Herdr it is silent. Restart Claude Code with `PSTACK_HERDR_ALLOW_NATIVE_AGENT=1` to bypass it on purpose.
 
 ## Workflows routed through Herdr
 
