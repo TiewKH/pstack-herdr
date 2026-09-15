@@ -6,6 +6,10 @@ This is a structural runtime rule, not a session-start hint. Skills and playbook
 
 The dispatcher calls the installed `herdr` binary itself and owns pane creation, profile environment, agent startup, prompt delivery, lifecycle waiting, output reads, and delegation depth.
 
+## The Agent gate
+
+A `PreToolUse` hook on `Agent` (`herdr-agent-gate.sh` under the plugin hooks directory) enforces this mapping on Claude Code. With `HERDR_ENV=1`, and `herdr` and `bun` both found (`bun` on PATH or at `~/.bun/bin/bun`), it denies the call and returns the dispatcher command. If `herdr` or `bun` is missing it allows the call and says which one to install. Outside Herdr it is silent. `PSTACK_HERDR_ALLOW_NATIVE_AGENT=1` bypasses it for a delegation the dispatcher cannot represent.
+
 ## Tool actions
 
 | pstack / Claude action | Herdr equivalent |
@@ -56,11 +60,17 @@ Use these role names consistently:
 
 The caller chooses `--cwd`. Read-only workers may share the current checkout. Concurrent writers must receive separate worktrees or otherwise isolated writable paths before dispatch. Arena candidates are always isolated.
 
+## Worker environment
+
+A profile's `env` reaches the worker pane as `--env` flags, except a config home equal to the CLI's default (`CLAUDE_CONFIG_DIR=~/.claude`, `CODEX_HOME=~/.codex`), which the dispatcher drops unless the shell that started Herdr exports a different home for that variable. Claude Code keeps its onboarding state in `$CLAUDE_CONFIG_DIR/.claude.json` once the variable is set, so a worker given the default home boots into first-run onboarding and the prompt lands on a menu. A separately authenticated home such as `~/.claude-a` still passes through; complete its onboarding once by hand.
+
 ## Result handling
 
-With `--wait`, the dispatcher returns JSON containing the Herdr agent name, pane, selected profile, kind, nesting depth, lifecycle status, blocked flag, and recent agent output. `blocked: true` is not completion. Inspect the worker in Herdr and resolve the approval/question deliberately. `unknown` is not proof of completion: it is the status Herdr reported, not a missing field.
+When the prompt is not accepted or not delivered, the dispatcher reads the worker's visible screen, closes the pane, and puts that screen in the error, so a stuck onboarding menu or trust prompt is visible from the caller.
 
-`--timeout` and `orchestration.default_timeout_ms` are one budget applied to both `agent start` readiness and `agent prompt --wait`.
+With `--wait`, the dispatcher returns JSON containing the Herdr agent name, pane, selected profile, kind, nesting depth, lifecycle status, blocked flag, and recent agent output. `blocked: true` is not completion. Inspect the worker in Herdr and resolve the approval/question deliberately. `unknown` is not proof of completion: it is the status Herdr reported, not a missing field. `working` means the wait budget ran out with the worker still running; the pane stays open. Poll it with `herdr agent wait <name> --timeout <ms>` and read it with `herdr agent read <name> --source recent-unwrapped`, or close it with `herdr pane close <pane>` if the work is no longer wanted.
+
+`--timeout` and `orchestration.default_timeout_ms` are one budget applied to `agent start` readiness (at most the 300000 ms Herdr accepts) and to the `agent wait` that follows a prompt. Before typing, the dispatcher waits for the worker to report idle, then counts the prompt delivered once the agent leaves idle (`working`, `blocked`, or `done`) within `PSTACK_HERDR_DELIVERY_WINDOW_MS` (default 8000), retrying the prompt once. A prompt that never lands is an error that carries the screen, never a `done` over an empty composer.
 
 The dispatcher refuses to run outside `HERDR_ENV=1` and refuses recursive delegation at the configured depth limit. It owns the pane through prompt acceptance; a start or prompt failure closes that pane.
 

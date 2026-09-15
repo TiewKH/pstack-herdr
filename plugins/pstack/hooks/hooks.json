@@ -12,6 +12,19 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/herdr-agent-gate.sh\"",
+            "shell": "bash",
+            "async": false
+          }
+        ]
+      }
     ]
   }
 }
