@@ -305,7 +305,7 @@ The table below is also the source of truth used by `tools/generate.mjs` for Cod
 | `/show-me-your-work` | log decisions to a reviewable tsv decision trail |
 | `/blast-radius` | find what a change could break beyond the diff and prove safety by running code |
 | `/recall` | catch up on recent working context from chat history, live state, and the shared record |
-| `/setup-pstack` | configure pstack per-role model choices and Herdr reasoning budget |
+| `/setup-pstack` | configure pstack per-role model choices and an optional Herdr reasoning-budget preset |
 | `/unslop` | clean up writing by removing AI tells |
 | `/no-comments` | strip comments before review, fix the accepted findings, encode claimed constraints |
 | `/create-verification-skill` | generate a project-local verification skill and feature map |
