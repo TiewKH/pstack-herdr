@@ -31,9 +31,17 @@ export HERDR_AGENT=claude
 herdr pane report-agent "$HERDR_PANE_ID" \
   --source custom:pstack-herdr-ci --agent claude --state idle >/dev/null
 
+# herdr-dispatch.ts believes a done/idle verdict only once a transcript under
+# $CLAUDE_CONFIG_DIR/projects records the prompt (turnEvidence), so this stand-in
+# writes one after each prompt, the same shape a real Claude Code session writes.
+transcript_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/pstack-herdr-e2e"
+mkdir -p "$transcript_dir"
+
 while IFS= read -r prompt; do
   herdr pane report-agent "$HERDR_PANE_ID" \
     --source custom:pstack-herdr-ci --agent claude --state working >/dev/null
+  printf '{"type":"user","message":{"role":"user","content":%s}}\n' \
+    "$(printf '%s' "$prompt" | jq -Rs .)" >> "$transcript_dir/session.jsonl"
   printf 'FAKE_CLAUDE_RESULT:%s\n' "$prompt"
   herdr pane report-agent "$HERDR_PANE_ID" \
     --source custom:pstack-herdr-ci --agent claude --state idle >/dev/null
