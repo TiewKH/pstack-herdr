@@ -31,8 +31,8 @@ jobs:
           import {join} from "node:path";
           import {tmpdir} from "node:os";
           import {execFileSync} from "node:child_process";
-          import {applySubstitutions} from process.cwd()+"/tools/sync.mjs";
-          import {deriveSkill} from process.cwd()+"/tools/generate.mjs";
+          const {applySubstitutions}=await import("file://"+process.cwd()+"/tools/sync.mjs");
+          const {deriveSkill}=await import("file://"+process.cwd()+"/tools/generate.mjs");
           const rels=["skills/arena/SKILL.md","skills/automate-me/SKILL.md","skills/interrogate/SKILL.md","skills/poteto-mode/playbooks/autopilot-full.md","skills/poteto-mode/playbooks/autopilot-stack.md","skills/poteto-mode/playbooks/babysit.md","skills/poteto-mode/playbooks/bug-fix.md","skills/poteto-mode/playbooks/eval.md","skills/poteto-mode/playbooks/feature.md","skills/poteto-mode/playbooks/multi-phase-plan.md","skills/poteto-mode/playbooks/opening-a-pr.md","skills/poteto-mode/playbooks/orchestrate.md","skills/poteto-mode/playbooks/refactoring.md","skills/poteto-mode/playbooks/session-pickup.md","skills/poteto-mode/playbooks/shipping.md","skills/poteto-mode/playbooks/worktree-cleanup.md","skills/poteto-mode/SKILL.md","skills/reflect/SKILL.md","skills/setup-pstack/SKILL.md","skills/show-me-your-work/SKILL.md","skills/why/references/sources/databricks.md"];
           const {substitutions}=JSON.parse(readFileSync("tools/substitutions.json","utf8"));
           const derive=(root,rel)=>deriveSkill("plugins/pstack/"+rel,applySubstitutions(readFileSync(join(root,"pstack",rel),"utf8"),substitutions).text);
