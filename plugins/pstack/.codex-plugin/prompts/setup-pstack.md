@@ -1,6 +1,6 @@
 ---
 name: setup-pstack
-description: configure pstack per-role model choices
+description: configure pstack per-role model choices and Herdr reasoning budget
 disable-model-invocation: true
 ---
 
