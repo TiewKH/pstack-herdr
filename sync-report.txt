@@ -1,0 +1,109 @@
+cloning https://github.com/cursor/plugins ...
+Cloning into '/tmp/pstack-sync-K95Idy/clone'...
+Updating files:   0% (1/767)Updating files:   1% (8/767)Updating files:   2% (16/767)Updating files:   3% (24/767)Updating files:   4% (31/767)Updating files:   5% (39/767)Updating files:   6% (47/767)Updating files:   7% (54/767)Updating files:   8% (62/767)Updating files:   9% (70/767)Updating files:  10% (77/767)Updating files:  11% (85/767)Updating files:  12% (93/767)Updating files:  13% (100/767)Updating files:  14% (108/767)Updating files:  15% (116/767)Updating files:  16% (123/767)Updating files:  17% (131/767)Updating files:  18% (139/767)Updating files:  19% (146/767)Updating files:  20% (154/767)Updating files:  21% (162/767)Updating files:  22% (169/767)Updating files:  23% (177/767)Updating files:  24% (185/767)Updating files:  25% (192/767)Updating files:  26% (200/767)Updating files:  27% (208/767)Updating files:  28% (215/767)Updating files:  29% (223/767)Updating files:  30% (231/767)Updating files:  31% (238/767)Updating files:  32% (246/767)Updating files:  33% (254/767)Updating files:  34% (261/767)Updating files:  35% (269/767)Updating files:  36% (277/767)Updating files:  37% (284/767)Updating files:  38% (292/767)Updating files:  39% (300/767)Updating files:  40% (307/767)Updating files:  41% (315/767)Updating files:  42% (323/767)Updating files:  43% (330/767)Updating files:  44% (338/767)Updating files:  45% (346/767)Updating files:  46% (353/767)Updating files:  47% (361/767)Updating files:  48% (369/767)Updating files:  49% (376/767)Updating files:  50% (384/767)Updating files:  51% (392/767)Updating files:  52% (399/767)Updating files:  53% (407/767)Updating files:  54% (415/767)Updating files:  55% (422/767)Updating files:  56% (430/767)Updating files:  57% (438/767)Updating files:  58% (445/767)Updating files:  59% (453/767)Updating files:  60% (461/767)Updating files:  61% (468/767)Updating files:  62% (476/767)Updating files:  63% (484/767)Updating files:  64% (491/767)Updating files:  65% (499/767)Updating files:  66% (507/767)Updating files:  67% (514/767)Updating files:  68% (522/767)Updating files:  69% (530/767)Updating files:  70% (537/767)Updating files:  71% (545/767)Updating files:  72% (553/767)Updating files:  73% (560/767)Updating files:  74% (568/767)Updating files:  75% (576/767)Updating files:  76% (583/767)Updating files:  77% (591/767)Updating files:  78% (599/767)Updating files:  79% (606/767)Updating files:  80% (614/767)Updating files:  81% (622/767)Updating files:  82% (629/767)Updating files:  83% (637/767)Updating files:  84% (645/767)Updating files:  85% (652/767)Updating files:  86% (660/767)Updating files:  87% (668/767)Updating files:  88% (675/767)Updating files:  89% (683/767)Updating files:  90% (691/767)Updating files:  91% (698/767)Updating files:  92% (706/767)Updating files:  93% (714/767)Updating files:  94% (721/767)Updating files:  95% (729/767)Updating files:  96% (737/767)Updating files:  97% (744/767)Updating files:  98% (752/767)Updating files:  99% (760/767)Updating files: 100% (767/767)Updating files: 100% (767/767), done.
+Preparing worktree (detached HEAD e8d856f)
+Preparing worktree (detached HEAD 5bf2b15)
+
+unchanged: 32 files, excluded: 35
+updated: skills/architect/references/rationale-template.md
+updated: skills/architect/references/runner-prompt.md
+merged: skills/architect/SKILL.md
+merged: skills/blast-radius/SKILL.md
+updated: skills/figure-it-out/SKILL.md
+updated: skills/how/references/explainer-prompt.md
+updated: skills/interrogate/references/code-quality-review.md
+updated: skills/interrogate/references/lead-judgment.md
+updated: skills/interrogate/references/rubric.md
+merged: skills/poteto-mode/playbooks/authoring-a-skill.md
+updated: skills/poteto-mode/playbooks/hillclimb.md
+updated: skills/poteto-mode/playbooks/perf-issue.md
+updated: skills/poteto-mode/playbooks/prototype.md
+updated: skills/poteto-mode/playbooks/runtime-forensics.md
+updated: skills/poteto-mode/playbooks/trace-forensics.md
+updated: skills/poteto-mode/playbooks/visual-parity.md
+updated: skills/principle-boundary-discipline/SKILL.md
+updated: skills/principle-build-the-lever/SKILL.md
+updated: skills/principle-experience-first/SKILL.md
+updated: skills/principle-foundational-thinking/SKILL.md
+updated: skills/principle-minimize-reader-load/SKILL.md
+updated: skills/principle-model-the-domain/SKILL.md
+updated: skills/principle-never-block-on-the-human/SKILL.md
+updated: skills/principle-separate-before-serializing-shared-state/SKILL.md
+updated: skills/principle-sequence-verifiable-units/SKILL.md
+updated: skills/principle-type-system-discipline/SKILL.md
+merged: skills/recall/SKILL.md
+merged: skills/reflect/references/synthesizer.md
+merged: skills/reflect/references/tooling-reviewer.md
+merged: skills/tdd/SKILL.md
+merged: skills/teach/SKILL.md
+updated: skills/technical-writing/SKILL.md
+updated: skills/typescript-best-practices/references/patterns.md
+updated: skills/why/references/epistemics.md
+updated: skills/why/references/investigator-prompt.md
+updated: skills/why/references/source-playbook.md
+updated: skills/why/references/sources/datadog.md
+updated: skills/why/references/sources/incident-postmortem.md
+updated: skills/why/references/sources/linear.md
+updated: skills/why/references/sources/notion.md
+updated: skills/why/references/sources/sentry.md
+updated: skills/why/references/sources/slack.md
+merged: skills/why/references/synthesizer-prompt.md
+merged: skills/why/SKILL.md
+substituted: "control skill" x4
+substituted: ".cursor/skills/" x2
+substituted: "(default `claude-fable-5-1-thinking-max`)" x1
+substituted: "`generalPurpose`" x2
+
+forked (upstream untouched): 26
+  plugins/pstack/agents/comment-sicko.md
+  plugins/pstack/agents/poteto-agent.md
+  plugins/pstack/skills/bro/SKILL.md
+  plugins/pstack/skills/create-verification-skill/SKILL.md
+  plugins/pstack/skills/how/SKILL.md
+  plugins/pstack/skills/maintain-verification-skill/SKILL.md
+  plugins/pstack/skills/no-comments/SKILL.md
+  plugins/pstack/skills/poteto-mode/playbooks/autonomous-run.md
+  plugins/pstack/skills/poteto-mode/scripts/bootstrap.ts
+  plugins/pstack/skills/poteto-mode/scripts/check-plan.mjs
+  plugins/pstack/skills/poteto-mode/scripts/orch/orch.test.ts
+  plugins/pstack/skills/poteto-mode/scripts/orch/store.ts
+  plugins/pstack/skills/poteto-mode/scripts/package.json
+  plugins/pstack/skills/poteto-mode/scripts/watch-pr/cli.ts
+  plugins/pstack/skills/poteto-mode/scripts/watch-pr/fakes.test-helper.ts
+  plugins/pstack/skills/poteto-mode/scripts/watch-pr/github.test.ts
+  plugins/pstack/skills/poteto-mode/scripts/watch-pr/github.ts
+  plugins/pstack/skills/poteto-mode/scripts/watch-pr/policy.test.ts
+  plugins/pstack/skills/poteto-mode/scripts/watch-pr/policy.ts
+  plugins/pstack/skills/poteto-mode/scripts/watch-pr/types.compile.ts
+  plugins/pstack/skills/poteto-mode/scripts/watch-pr/types.ts
+  plugins/pstack/skills/poteto-mode/scripts/worktree-audit.sh
+  plugins/pstack/skills/principle-prove-it-works/SKILL.md
+  plugins/pstack/skills/reflect/references/divergent-reviewer.md
+  plugins/pstack/skills/reflect/references/judgment-reviewer.md
+  plugins/pstack/skills/swarm/SKILL.md
+
+needs a human (port-specific edits the tool could not merge):
+  plugins/pstack/skills/arena/SKILL.md (conflict, 1 hunk)
+  plugins/pstack/skills/automate-me/SKILL.md (conflict, 3 hunks)
+  plugins/pstack/skills/interrogate/SKILL.md (conflict, 1 hunk)
+  plugins/pstack/skills/poteto-mode/playbooks/autopilot-full.md (conflict, 1 hunk)
+  plugins/pstack/skills/poteto-mode/playbooks/autopilot-stack.md (conflict, 1 hunk)
+  plugins/pstack/skills/poteto-mode/playbooks/babysit.md (conflict, 1 hunk)
+  plugins/pstack/skills/poteto-mode/playbooks/bug-fix.md (conflict, 1 hunk)
+  plugins/pstack/skills/poteto-mode/playbooks/eval.md (conflict, 1 hunk)
+  plugins/pstack/skills/poteto-mode/playbooks/feature.md (conflict, 1 hunk)
+  plugins/pstack/skills/poteto-mode/playbooks/multi-phase-plan.md (conflict, 2 hunks)
+  plugins/pstack/skills/poteto-mode/playbooks/opening-a-pr.md (conflict, 2 hunks)
+  plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md (conflict, 5 hunks)
+  plugins/pstack/skills/poteto-mode/playbooks/refactoring.md (conflict, 2 hunks)
+  plugins/pstack/skills/poteto-mode/playbooks/session-pickup.md (conflict, 1 hunk)
+  plugins/pstack/skills/poteto-mode/playbooks/shipping.md (conflict, 2 hunks)
+  plugins/pstack/skills/poteto-mode/playbooks/worktree-cleanup.md (conflict, 1 hunk)
+  plugins/pstack/skills/poteto-mode/SKILL.md (conflict, 3 hunks)
+  plugins/pstack/skills/reflect/SKILL.md (conflict, 3 hunks)
+  plugins/pstack/skills/setup-pstack/SKILL.md (conflict, 5 hunks)
+  plugins/pstack/skills/show-me-your-work/SKILL.md (conflict, 1 hunk)
+  plugins/pstack/skills/why/references/sources/databricks.md (conflict, 1 hunk)
+
+pinned: pstack -> 5bf2b1544db739998121a306340631963c2ff3de
+next: review the diff, resolve the conflicts list, write the CHANGES.md entry from this report, run bun tools/generate.mjs
