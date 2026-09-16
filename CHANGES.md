@@ -2,6 +2,10 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
+## 0.9.32 - a done verdict needs transcript proof
+
+Herdr once read a pane whose CLI booted but never ran its prompt as done: the machine slept mid-dispatch, a worker showed a static banner, and the dispatcher returned done with an empty composer as output. After `agent wait`, a done or idle status now needs proof that the prompt ran: a Codex rollout under `$CODEX_HOME/sessions`, or a Claude session file under `$CLAUDE_CONFIG_DIR/projects`, written after the prompt was sent and holding its first line. Without that proof the dispatcher captures the screen, closes the pane, and throws, the same shape as a failed delivery.
+
 ## 0.9.31 - the Agent gate, the default config home, and prompt delivery
 
 A `PreToolUse` hook on `Agent` (`plugins/pstack/hooks/herdr-agent-gate.sh`) now enforces the Herdr mapping that was prose only. With `HERDR_ENV=1` and `herdr`, `bun`, and the dispatcher present, it denies a native subagent call and returns the `herdr-dispatch.ts` command and the mapping path. When any of those is missing it allows the call and names the missing piece. Outside Herdr it is silent, and restarting Claude Code with `PSTACK_HERDR_ALLOW_NATIVE_AGENT=1` bypasses it.
