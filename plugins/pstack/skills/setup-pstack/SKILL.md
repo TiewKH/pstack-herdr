@@ -1,6 +1,6 @@
 ---
 name: setup-pstack
-description: Configure which models and worker profiles pstack uses and, in Herdr, an optional reasoning-budget preset. In Herdr sessions, writes role/profile routing to ~/.config/pstack-herdr/routes.yaml; outside Herdr, writes the native Claude model override sheet. Use for /setup-pstack, "configure pstack models", "pstack budget", or changing pstack's model choices.
+description: Configure which models and worker profiles pstack uses. In Herdr sessions, writes role/profile routing to ~/.config/pstack-herdr/routes.yaml; outside Herdr, writes the native Claude model override sheet. Use for /setup-pstack, "configure pstack models", or changing pstack's model choices.
 ---
 
 # Setup pstack
@@ -36,29 +36,11 @@ If `~/.config/pstack-herdr/routes.yaml` already exists, read it and treat its pr
 
 When reconstructing setup JSON from an existing file, set each profile's `config_home` from `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, and keep any other `env` entries. Leave `config_home` out for the CLI's default home (`~/.claude`, `~/.codex`). Claude Code keeps its onboarding state under `$CLAUDE_CONFIG_DIR`, so a worker given the default home boots into first-run onboarding; the dispatcher ignores such a value at run time. Omit `orchestration` from the JSON unless the user is changing it, so the writer preserves the current values.
 
-### 3. Budget, map, and confirm
+### 3. Map and confirm
 
-**(a) Offer an optional budget preset.** Prefer `AskUserQuestion` over free text. The default is to keep the current per-profile effort choices, including leaving effort unset. Offer:
+Show every profile (name, kind, model, effort, config home, extra env) and every role with its current profile pool and strategy. Call out which profiles share a subscription/config home. Mark any model not in the detected set as needing a choice.
 
-- `keep current/default — no global effort override`
-- `unlimited — keep max`
-- `large — xhigh reasoning`
-- `medium — high reasoning`
-- `small — medium reasoning`
-
-The last four preserve upstream pstack's budget labels. Choosing a budget preset is optional; it is a convenience for changing all profiles at once, not a requirement that every profile have an effort override.
-
-**(b) Apply a chosen preset to Herdr profiles.** Herdr represents model and effort separately, so do not rewrite model slugs to encode the budget.
-
-- `keep current/default`: preserve each profile's current `effort` exactly. A profile with no effort stays unset and uses the worker CLI's own default.
-- `unlimited`: set each profile to that CLI's highest supported effort, `max` for Claude and `xhigh` for Codex.
-- `large`: set `xhigh`.
-- `medium`: set `high`.
-- `small`: set `medium`.
-
-After applying a preset, let the user override or clear `effort` on individual profiles. Effort remains optional per profile. Validate the chosen effort against the profile kind: Claude accepts `low`, `medium`, `high`, `xhigh`, `max`; Codex accepts `minimal`, `low`, `medium`, `high`, `xhigh`.
-
-**(c) Show the profiles and roles and confirm.** Show every profile (name, kind, model, effort, config home, extra env) and every role with its current profile pool and strategy. Call out which profiles share a subscription/config home. Mark any model not in the detected set as needing a choice. Ask whether to accept as-is or change specific profiles or roles.
+Ask whether to accept as-is or change specific profiles or roles. Prefer `AskUserQuestion` over free text.
 
 Collect profiles with:
 
@@ -174,8 +156,6 @@ Tell the user:
 If the user also wants native non-Herdr sessions configured, continue with **Native setup**.
 
 ## Native setup
-
-The upstream budget control maps to Herdr's explicit worker effort setting. Native Claude `Agent` delegation in this port has no separate per-call effort field, so native setup remains model-only.
 
 Write `~/.claude/pstack-models.md`, a per-role model override sheet you include from your global `CLAUDE.md`. Each pstack skill names a default model inline; the override sheet is the layer that adapts those defaults to the models you actually have access to.
 
