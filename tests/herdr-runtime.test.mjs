@@ -140,6 +140,12 @@ if (!setup.includes("Show every profile") || !setup.includes("Ask whether to acc
 if (!setup.includes("Multiple profiles may share the same config home")) {
   throw new Error("setup-pstack does not document single-subscription multi-profile routing");
 }
+if (!setup.includes("keep current/default — no global effort override")) {
+  throw new Error("setup-pstack must keep Herdr effort optional by default");
+}
+if (!setup.includes("Effort remains optional per profile")) {
+  throw new Error("setup-pstack must state that Herdr effort remains optional per profile");
+}
 if (!setup.includes("## Native setup") || !setup.includes("~/.claude/pstack-models.md")) {
   throw new Error("setup-pstack lost the native fallback configuration path");
 }
