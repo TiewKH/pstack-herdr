@@ -1,0 +1,183 @@
+name: Finalize pstack sync
+
+on:
+  push:
+    branches:
+      - sync/pstack-5bf2b154
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: "1.3.14"
+      - name: Resolve port-specific overlaps
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          def edit(path, old, new, count=None):
+              p=Path(path); s=p.read_text()
+              if old not in s:
+                  raise SystemExit(f"missing expected text in {path}: {old[:100]!r}")
+              n=s.replace(old,new) if count is None else s.replace(old,new,count)
+              p.write_text(n)
+
+          # README pin and command description.
+          edit("README.md",
+               "It is synced against upstream `e8d856f` before the Herdr-specific port changes in this repository.",
+               "It is synced against upstream `5bf2b154` from `cursor/plugins/pstack`, with Herdr-specific port changes layered on top.")
+          edit("README.md",
+               "| `/setup-pstack` | configure pstack per-role model choices |",
+               "| `/setup-pstack` | configure pstack per-role model choices and Herdr reasoning budget |")
+
+          # Upstream moved code-oriented defaults to a Cursor/Grok model. The port keeps
+          # provider-neutral role defaults in models.json and resolves them at runtime.
+          for path in [
+              "plugins/pstack/skills/poteto-mode/playbooks/perf-issue.md",
+              "plugins/pstack/skills/poteto-mode/playbooks/hillclimb.md",
+          ]:
+              edit(path, "default `grok-4.6-fast-xhigh`", "default in poteto-mode's Models section")
+
+          # Upstream evidence-label rule.
+          edit("plugins/pstack/skills/poteto-mode/SKILL.md",
+               "- **Never fabricate a link, citation, or transcript reference.** Link only artifacts you produced or read this session.",
+               "- **Never fabricate a link, citation, or transcript reference.** Link only artifacts you produced or read this session.\n- **Every claim carries its evidence or its label in the same sentence.** Measured, inferred, or guess. A prediction or an unseen cause is a guess. Never hand the human a check you could run.")
+
+          # Operator-neutral wording while preserving this fork's operator-click merge policy.
+          neutral = {
+              "plugins/pstack/skills/poteto-mode/playbooks/autopilot-full.md": [
+                  ("Items the operator names stay hers. She reviews and she clicks, and no owner merges one. When she asks for the protocol or the plan to be stated, deliver the statement and stop. Execution starts only on her explicit go.",
+                   "Items the operator names stay with the operator. The operator reviews and clicks, and no owner merges one. When the operator asks for the protocol or the plan to be stated, deliver the statement and stop. Execution starts only on the operator's explicit go."),
+                  ("Her hold or stand-down reaches every owner as a zero-writes order immediately. Owners hold their briefs until she releases them.",
+                   "The operator's hold or stand-down reaches every owner as a zero-writes order immediately. Owners hold their briefs until the operator releases them."),
+              ],
+              "plugins/pstack/skills/poteto-mode/playbooks/autopilot-stack.md": [
+                  ("On her explicit go, write the full program objective into the standing orders and restate it in your todolist. That objective stands across turns until the chain is done. On her stop, every owner takes an immediate zero-writes hold.",
+                   "On the operator's explicit go, write the full program objective into the standing orders and restate it in your todolist. That objective stands across turns until the chain is done. On the operator's stop, every owner takes an immediate zero-writes hold."),
+              ],
+              "plugins/pstack/skills/poteto-mode/playbooks/multi-phase-plan.md": [
+                  ("State the protocol and this plan to the operator, then stop. Start execution only on her explicit go.",
+                   "State the protocol and this plan to the operator, then stop. Start execution only on the operator's explicit go."),
+                  ("On her go, write this exact text into the standing orders and restate it in your todolist.",
+                   "On the operator's go, write this exact text into the standing orders and restate it in your todolist."),
+                  ("Then send the operator a status message, whether or not anything changed,",
+                   "Then post a status message to the operator in chat, whether or not anything changed,"),
+              ],
+              "plugins/pstack/skills/poteto-mode/SKILL.md": [
+                  ("the operator lands herself", "the operator lands"),
+              ],
+          }
+          for path, reps in neutral.items():
+              for old,new in reps: edit(path,old,new)
+
+          # Apply the upstream prose cleanup where it intersects port-specific text,
+          # retaining Claude/Herdr paths and fork-only safety rules.
+          prose = {
+            "plugins/pstack/skills/arena/SKILL.md":[
+              ("The rubric is the picker's tool in Phase D; candidates only see the task.",
+               "The rubric is the picker's tool in Phase D. Candidates only see the task.")],
+            "plugins/pstack/skills/automate-me/SKILL.md":[
+              ("It sequences them; it doesn't replace them.","It sequences them. It doesn't replace them."),
+              ("Keep `description` as one YAML scalar; quote it or use","Keep `description` as one YAML scalar. Quote it or use"),
+              ("one narrow workflow (e.g. \"how I write commit messages\"): that's a regular skill",
+               "one narrow workflow (e.g. \"how I write commit messages\"). That's a regular skill")],
+            "plugins/pstack/skills/interrogate/SKILL.md":[
+              ("configured entry count; otherwise use the table defaults.",
+               "configured entry count. Otherwise use the table defaults.")],
+            "plugins/pstack/skills/poteto-mode/playbooks/bug-fix.md":[
+              ("does not override this; you drive the instrumented runtime.","does not override this. You drive the instrumented runtime."),
+              ("with a specific scope; review the diff.","with a specific scope. Review the diff."),
+              ("Verify on the same surface; the original repro now passes.","Verify on the same surface. The original repro now passes."),
+              ('not a pass; flag it.','not a pass. Flag it.'),
+              ("cheap local test path; skip it","cheap local test path. Skip it")],
+            "plugins/pstack/skills/poteto-mode/playbooks/refactoring.md":[
+              ("**You own the contract. The structure changes; the behavior does not.**",
+               "**You own the contract. The structure changes. The behavior does not.**"),
+              ("actual files; renames silently miss usages","actual files. Renames silently miss usages"),
+              ("with a specific scope (file paths, the names being moved, the behavior to hold); review the diff yourself.",
+               "with a specific scope (file paths, the names being moved, the behavior to hold). Review the diff yourself."),
+              ("verification yourself; do not trust a delegate's","verification yourself. Do not trust a delegate's")],
+            "plugins/pstack/skills/why/references/sources/databricks.md":[
+              ("is deduplicated, typed, and liquid-clustered; `your_warehouse.events.analytics_track_event`",
+               "is deduplicated, typed, and liquid-clustered. `your_warehouse.events.analytics_track_event`"),
+              ("or `cli`; confirm the exact model name","or `cli`. Confirm the exact model name")],
+          }
+          for path,reps in prose.items():
+              for old,new in reps: edit(path,old,new)
+
+          # Port upstream's setup budget to Herdr's separate model/effort axes.
+          edit("plugins/pstack/skills/setup-pstack/SKILL.md",
+               'description: Configure which models and worker profiles pstack uses. In Herdr sessions, writes role/profile routing to ~/.config/pstack-herdr/routes.yaml; outside Herdr, writes the native Claude model override sheet. Use for /setup-pstack, "configure pstack models", or changing pstack\'s model choices.',
+               'description: Configure which models and worker profiles pstack uses and, in Herdr, the reasoning budget. In Herdr sessions, writes role/profile routing to ~/.config/pstack-herdr/routes.yaml; outside Herdr, writes the native Claude model override sheet. Use for /setup-pstack, "configure pstack models", "pstack budget", or changing pstack\'s model choices.')
+          old = '''### 3. Map and confirm
+
+Show every profile (name, kind, model, effort, config home, extra env) and every role with its current profile pool and strategy. Call out which profiles share a subscription/config home. Mark any model not in the detected set as needing a choice.
+
+Ask whether to accept as-is or change specific profiles or roles. Prefer `AskUserQuestion` over free text.
+'''
+          new = '''### 3. Budget, map, and confirm
+
+**(a) Ask for a budget.** Prefer `AskUserQuestion` over free text. Offer the same four choices as upstream pstack:
+
+- `unlimited — keep max`
+- `large — xhigh reasoning`
+- `medium — high reasoning`
+- `small — medium reasoning`
+
+**(b) Apply it to Herdr profiles.** Herdr represents model and effort separately, so do not rewrite model slugs to encode the budget. `unlimited` keeps each profile's current effort or leaves it unset so the worker CLI owns its default. `large`, `medium`, and `small` set the default effort for every profile to `xhigh`, `high`, or `medium`. Let the user override individual profiles after applying the budget. Validate the chosen effort against the profile kind: Claude accepts `low`, `medium`, `high`, `xhigh`, `max`; Codex accepts `minimal`, `low`, `medium`, `high`, `xhigh`.
+
+**(c) Show the profiles and roles and confirm.** Show every profile (name, kind, model, effort, config home, extra env) and every role with its current profile pool and strategy. Call out which profiles share a subscription/config home. Mark any model not in the detected set as needing a choice. Ask whether to accept as-is or change specific profiles or roles.
+'''
+          edit("plugins/pstack/skills/setup-pstack/SKILL.md",old,new)
+          edit("plugins/pstack/skills/setup-pstack/SKILL.md",
+               "## Native setup\n\nWrite `~/.claude/pstack-models.md`",
+               "## Native setup\n\nThe upstream budget control maps to Herdr's explicit worker effort setting. Native Claude `Agent` delegation in this port has no separate per-call effort field, so native setup remains model-only.\n\nWrite `~/.claude/pstack-models.md`")
+
+          # Release notes for the sync.
+          p=Path("VERSION"); p.write_text("0.9.33\n")
+          ch=Path("CHANGES.md"); s=ch.read_text()
+          marker="# CHANGES — applied substitutions\n\n"
+          entry='''## 0.9.33 - sync pstack through 5bf2b154
+
+The pstack upstream pin moves from `e8d856f` to `5bf2b1544db739998121a306340631963c2ff3de`, the latest commit touching `cursor/plugins/pstack` at sync time. This carries the September prose-density cleanup, evidence-or-label reply rule, operator-neutral wording and in-chat status tick, the code-role default update, and the new setup reasoning-budget prompt.
+
+The sync tool applied the non-overlapping skill edits directly and three-way merged the compatible overlaps. Where upstream Cursor model/tool paths conflict with this fork, the Claude/Herdr adaptations remain authoritative. In particular, Cursor's Grok 4.6 defaults continue to resolve through this port's provider-neutral role table, and the new budget control maps to Herdr's separate profile `effort` field instead of rewriting model slugs. Native Claude setup remains model-only because this port's native `Agent` path has no independent effort field.
+
+'''
+          if "## 0.9.33 " not in s:
+              if not s.startswith(marker): raise SystemExit("CHANGES header changed")
+              ch.write_text(marker+entry+s[len(marker):])
+
+          # Temporary sync artifacts never ship.
+          for name in ["sync-report.txt","conflict-hunks.txt"]:
+              Path(name).unlink(missing_ok=True)
+          PY
+      - name: Generate and validate
+        shell: bash
+        run: |
+          bun tools/generate.mjs
+          bun test tests/
+          node tests/herdr-runtime.test.mjs
+          if grep -R --line-number --fixed-strings 'grok-4.6-fast-xhigh' plugins/pstack/skills; then
+            echo "unexpected Cursor-only Grok slug remains in ported skills" >&2
+            exit 1
+          fi
+      - name: Commit finalized sync
+        shell: bash
+        run: |
+          rm .github/workflows/sync-pstack-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "sync: update pstack skills through 5bf2b154"
+          git push origin HEAD:${{ github.ref_name }}
