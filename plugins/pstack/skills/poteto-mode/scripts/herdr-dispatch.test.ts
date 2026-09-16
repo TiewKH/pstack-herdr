@@ -761,4 +761,21 @@ describe("herdr-dispatch turn evidence", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  test("a claude transcript under the default config home is evidence with no session id known", () => {
+    const home = mkdtempSync(join(tmpdir(), "pstack-herdr-evidence-"));
+    try {
+      const prompt = "pstack-herdr-e2e";
+      const since = Date.now() - 1000;
+      const query = { kind: "claude" as const, prompt, since, env: {}, home };
+      expect(turnEvidence(query)).toBe(false);
+      const projects = join(home, ".claude", "projects", "pstack-herdr-e2e");
+      mkdirSync(projects, { recursive: true });
+      const line = JSON.stringify({ type: "user", message: { role: "user", content: prompt } });
+      writeFileSync(join(projects, "session.jsonl"), `${line}\n`);
+      expect(turnEvidence(query)).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
