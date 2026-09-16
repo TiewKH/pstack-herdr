@@ -1,6 +1,6 @@
 ---
 name: setup-pstack
-description: Configure which models and worker profiles pstack uses and, in Herdr, the reasoning budget. In Herdr sessions, writes role/profile routing to ~/.config/pstack-herdr/routes.yaml; outside Herdr, writes the native Claude model override sheet. Use for /setup-pstack, "configure pstack models", "pstack budget", or changing pstack's model choices.
+description: Configure which models and worker profiles pstack uses and, in Herdr, an optional reasoning-budget preset. In Herdr sessions, writes role/profile routing to ~/.config/pstack-herdr/routes.yaml; outside Herdr, writes the native Claude model override sheet. Use for /setup-pstack, "configure pstack models", "pstack budget", or changing pstack's model choices.
 ---
 
 # Setup pstack
@@ -38,14 +38,25 @@ When reconstructing setup JSON from an existing file, set each profile's `config
 
 ### 3. Budget, map, and confirm
 
-**(a) Ask for a budget.** Prefer `AskUserQuestion` over free text. Offer these four options with the same labels as upstream pstack:
+**(a) Offer an optional budget preset.** Prefer `AskUserQuestion` over free text. The default is to keep the current per-profile effort choices, including leaving effort unset. Offer:
 
+- `keep current/default — no global effort override`
 - `unlimited — keep max`
 - `large — xhigh reasoning`
 - `medium — high reasoning`
 - `small — medium reasoning`
 
-**(b) Apply it to Herdr profiles.** Herdr represents model and effort separately, so do not rewrite model slugs to encode the budget. `unlimited` keeps each profile's current effort or leaves it unset so the worker CLI owns its default. `large`, `medium`, and `small` set the default effort for every profile to `xhigh`, `high`, or `medium`. Let the user override individual profiles after applying the budget. Validate the chosen effort against the profile kind: Claude accepts `low`, `medium`, `high`, `xhigh`, `max`; Codex accepts `minimal`, `low`, `medium`, `high`, `xhigh`.
+The last four preserve upstream pstack's budget labels. Choosing a budget preset is optional; it is a convenience for changing all profiles at once, not a requirement that every profile have an effort override.
+
+**(b) Apply a chosen preset to Herdr profiles.** Herdr represents model and effort separately, so do not rewrite model slugs to encode the budget.
+
+- `keep current/default`: preserve each profile's current `effort` exactly. A profile with no effort stays unset and uses the worker CLI's own default.
+- `unlimited`: set each profile to that CLI's highest supported effort, `max` for Claude and `xhigh` for Codex.
+- `large`: set `xhigh`.
+- `medium`: set `high`.
+- `small`: set `medium`.
+
+After applying a preset, let the user override or clear `effort` on individual profiles. Effort remains optional per profile. Validate the chosen effort against the profile kind: Claude accepts `low`, `medium`, `high`, `xhigh`, `max`; Codex accepts `minimal`, `low`, `medium`, `high`, `xhigh`.
 
 **(c) Show the profiles and roles and confirm.** Show every profile (name, kind, model, effort, config home, extra env) and every role with its current profile pool and strategy. Call out which profiles share a subscription/config home. Mark any model not in the detected set as needing a choice. Ask whether to accept as-is or change specific profiles or roles.
 
