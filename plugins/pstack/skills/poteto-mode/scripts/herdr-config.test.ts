@@ -90,6 +90,24 @@ describe("herdr deterministic setup", () => {
     expect(parseRoutes(yaml)).toEqual(config);
   });
 
+  test("effort rejects values unsupported by the profile kind", () => {
+    const badClaude = structuredClone(setup);
+    badClaude.profiles[0].effort = "minimal";
+    expect(() => parseSetupInput(JSON.stringify(badClaude))).toThrow(
+      "effort must be one of low, medium, high, xhigh, max for claude"
+    );
+
+    const badCodex = structuredClone(setup);
+    badCodex.profiles[0] = {
+      ...badCodex.profiles[0],
+      kind: "codex",
+      effort: "max",
+    };
+    expect(() => parseSetupInput(JSON.stringify(badCodex))).toThrow(
+      "effort must be one of minimal, low, medium, high, xhigh for codex"
+    );
+  });
+
   test("two profiles may share one subscription config home", () => {
     const result = buildRoutes({}, parseSetupInput(JSON.stringify(setup)));
     expect(result.profiles?.["claude-strong"].env?.CLAUDE_CONFIG_DIR).toBe("~/.claude-team");

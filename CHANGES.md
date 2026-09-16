@@ -1,5 +1,11 @@
 # CHANGES — applied substitutions
 
+## 0.9.33 - sync pstack through 5bf2b154
+
+The pstack upstream pin moves from `e8d856f` to `5bf2b1544db739998121a306340631963c2ff3de`, the latest commit touching `cursor/plugins/pstack` at sync time. This carries the September prose-density cleanup, evidence-or-label reply rule, operator-neutral wording and in-chat status tick, and the code-role default update. The upstream setup reasoning-budget prompt is intentionally not adopted because this fork already configures model and effort independently per Herdr worker profile.
+
+The sync tool applied the non-overlapping skill edits directly and three-way merged the compatible overlaps. Where upstream Cursor model/tool paths conflict with this fork, the Claude/Herdr adaptations remain authoritative. Cursor's Grok 4.6 defaults therefore continue to resolve through this port's role/model policy. `setup-pstack` keeps this fork's existing per-profile `model` + optional `effort` configuration instead of importing upstream's global reasoning-budget preset. The deterministic Herdr config parser now rejects effort values unsupported by the selected Claude/Codex worker kind.
+
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
 ## 0.9.32 - a done verdict needs transcript proof
