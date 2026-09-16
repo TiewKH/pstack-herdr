@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { ensureDependenciesInstalled } from "./bootstrap.ts";
 import {
   CONFIG_HOMES,
@@ -60,6 +60,18 @@ export interface CommandResult {
 
 export type HerdrExec = (args: string[]) => Promise<CommandResult>;
 
+export interface TurnEvidenceQuery {
+  kind: AgentKind;
+  prompt: string;
+  since: number;
+  sessionId?: string;
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+}
+
+// True when a worker transcript written since `since` records the prompt.
+export type TurnEvidence = (query: TurnEvidenceQuery) => boolean;
+
 export class HerdrError extends Error {
   readonly command: string;
   readonly code: string | undefined;
@@ -104,6 +116,12 @@ const DELIVERY_WINDOW_MS = 8000;
 const DELIVERY_POLL_MS = 500;
 const PROMPT_ATTEMPTS = 2;
 const LONG_ARG_CHARS = 120;
+// Herdr reads a pane that never ran its prompt as `done`: a CLI that booted but stalled
+// (the machine slept mid-dispatch) shows a static banner, which the status classifier
+// takes for a finished turn. The transcript the CLI writes is the ground truth, so a
+// `done` or `idle` verdict is only believed when one written after the prompt contains it.
+const EVIDENCE_SKEW_MS = 2000;
+const EVIDENCE_NEEDLE_CHARS = 120;
 
 function asObject(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -324,6 +342,86 @@ export function agentStatus(payload: unknown): AgentStatus {
   const root = asObject(payload, "herdr agent get");
   const agent = asObject(asObject(root.result, "result").agent, "result.agent");
   return parseAgentStatus(agent.agent_status);
+}
+
+// Herdr reports a Claude worker's session id, which names its transcript file.
+export function agentSessionId(payload: unknown): string | undefined {
+  try {
+    const root = asObject(payload, "herdr agent get");
+    const agent = asObject(asObject(root.result, "result").agent, "result.agent");
+    const session = agent.agent_session;
+    if (typeof session !== "object" || session === null) return undefined;
+    const value = (session as Record<string, unknown>).value;
+    return typeof value === "string" && value !== "" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// The prompt's first line, JSON-escaped as a transcript stores it. The read-only prefix
+// is skipped because every read-only worker shares it.
+export function promptNeedle(prompt: string): string {
+  const body = prompt.startsWith(READONLY_PREFIX) ? prompt.slice(READONLY_PREFIX.length) : prompt;
+  const firstLine = body.split("\n").find((line) => line.trim() !== "") ?? "";
+  return JSON.stringify(firstLine.slice(0, EVIDENCE_NEEDLE_CHARS)).slice(1, -1);
+}
+
+function configHome(kind: AgentKind, env: NodeJS.ProcessEnv, home: string): string {
+  const { key, defaultDir } = CONFIG_HOMES[kind];
+  const raw = env[key];
+  return raw ? resolve(expandHome(raw, home)) : resolve(home, defaultDir);
+}
+
+function transcriptsSince(root: string, since: number): string[] {
+  const found: string[] = [];
+  const walk = (dir: string) => {
+    let entries: string[];
+    try {
+      entries = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry);
+      let stats;
+      try {
+        stats = statSync(path);
+      } catch {
+        continue;
+      }
+      if (stats.isDirectory()) walk(path);
+      else if (entry.endsWith(".jsonl") && stats.mtimeMs >= since) found.push(path);
+    }
+  };
+  walk(root);
+  return found;
+}
+
+// Codex writes `$CODEX_HOME/sessions/<date>/rollout-*.jsonl`; Claude writes
+// `$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<session-id>.jsonl`. Both store the user
+// turn as a JSON string, so the escaped first line of the prompt is what to look for.
+// Two concurrent workers given the same first line and the same CLI can vouch for each
+// other; a Claude worker is pinned to its own session id when Herdr reports one.
+export function turnEvidence(query: TurnEvidenceQuery): boolean {
+  const env = query.env ?? process.env;
+  const home = query.home ?? homedir();
+  const root =
+    query.kind === "codex"
+      ? join(configHome("codex", env, home), "sessions")
+      : join(configHome("claude", env, home), "projects");
+  const needle = promptNeedle(query.prompt);
+  if (needle === "") return true;
+  const files = transcriptsSince(root, query.since);
+  const candidates = query.sessionId
+    ? files.filter((file) => basename(file) === `${query.sessionId}.jsonl`)
+    : files;
+  return candidates.some((file) => {
+    try {
+      return readFileSync(file, "utf8").includes(needle);
+    } catch {
+      return false;
+    }
+  });
 }
 
 function resolvedPrompt(options: DispatchOptions): string {
@@ -558,13 +656,16 @@ function withScreen(error: unknown, screen: string): Error {
 export async function dispatch(
   options: DispatchOptions,
   env: NodeJS.ProcessEnv = process.env,
-  exec: HerdrExec = spawnHerdr
+  exec: HerdrExec = spawnHerdr,
+  evidence: TurnEvidence = turnEvidence
 ): Promise<DispatchResult> {
   const plan = planDispatch(options, env);
   const pane = paneId(await runHerdrJson(plan.placeArgs, exec), options.placement);
+  let promptedAt = Date.now();
   try {
     await startAgent(startArgs(options.name, pane, plan), exec);
     await settleBeforePrompt(options.name, plan.startTimeout, exec);
+    promptedAt = Date.now();
     await deliverPrompt(options.name, plan.prompt, plan.deliveryWindow, exec);
   } catch (error) {
     if (leavesPaneOpen(error)) throw error;
@@ -585,7 +686,28 @@ export async function dispatch(
   } catch (error) {
     if (!isWaitTimeout(error)) throw error;
   }
-  const status = agentStatus(await runHerdrJson(["agent", "get", options.name], exec));
+  const agent = await runHerdrJson(["agent", "get", options.name], exec);
+  const status = agentStatus(agent);
+  if (status === "done" || status === "idle") {
+    const ran = evidence({
+      kind: plan.kind,
+      prompt: plan.prompt,
+      since: promptedAt - EVIDENCE_SKEW_MS,
+      sessionId: agentSessionId(agent),
+      env,
+    });
+    if (!ran) {
+      const screen = await visibleScreen(options.name, exec);
+      await closePane(pane, exec);
+      throw withScreen(
+        new Error(
+          `${options.name} reports ${status}, but no ${plan.kind} transcript written since ` +
+            `${new Date(promptedAt).toISOString()} records the prompt: the worker never ran it`
+        ),
+        screen
+      );
+    }
+  }
   // Herdr refuses an unwrapped read while the agent is working; the screen is all there is.
   const output =
     status === "working"
