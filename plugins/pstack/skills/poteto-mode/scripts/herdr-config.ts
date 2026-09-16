@@ -114,13 +114,26 @@ function parseEnvMap(raw: unknown, label: string): Record<string, string> {
   return env;
 }
 
+const VALID_EFFORTS: Record<AgentKind, readonly string[]> = {
+  claude: ["low", "medium", "high", "xhigh", "max"],
+  codex: ["minimal", "low", "medium", "high", "xhigh"],
+};
+
 function parseProfile(raw: unknown, label: string): Profile {
   const profile = asObject(raw, label);
-  const parsed: Profile = { kind: parseAgentKind(profile.kind, `${label}.kind`) };
+  const kind = parseAgentKind(profile.kind, `${label}.kind`);
+  const parsed: Profile = { kind };
   const model = optionalString(profile.model, `${label}.model`);
   if (model) parsed.model = model;
   const effort = optionalString(profile.effort, `${label}.effort`);
-  if (effort) parsed.effort = effort;
+  if (effort) {
+    if (!VALID_EFFORTS[kind].includes(effort)) {
+      throw new Error(
+        `${label}.effort must be one of ${VALID_EFFORTS[kind].join(", ")} for ${kind}`
+      );
+    }
+    parsed.effort = effort;
+  }
   if (profile.env !== undefined) parsed.env = parseEnvMap(profile.env, `${label}.env`);
   return parsed;
 }
