@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadRoutes, parseRoutes, type RoutesConfig } from "./herdr-config.ts";
@@ -15,9 +15,11 @@ import {
   placementArgs,
   parseAgentStatus,
   planDispatch,
+  promptNeedle,
   readonlyAgentArgs,
   selectProfileName,
   stableIndex,
+  turnEvidence,
   workerEnv,
   type CommandResult,
   type DispatchOptions,
@@ -314,7 +316,8 @@ describe("herdr-dispatch Herdr sequence", () => {
     const result = await dispatch(
       { ...options, wait: true, timeout: 45000, readonly: false },
       herdrEnv,
-      exec
+      exec,
+      () => true
     );
     expect(result).toMatchObject({
       agent: "ci-explorer",
@@ -564,6 +567,64 @@ describe("herdr-dispatch Herdr sequence", () => {
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
   });
 
+  test("a done verdict without a transcript of the prompt is a failed run, not a result", async () => {
+    const { calls, exec } = scriptedExec({
+      ...happyPath(),
+      "agent get": getAfterPrompt("done", "done"),
+      "agent read": (args) =>
+        args.includes("visible") ? textResult("OpenAI Codex\n\n› Ask Codex to do anything\n") : readOk,
+    });
+    await expect(
+      dispatch({ ...options, wait: true }, herdrEnv, exec, () => false)
+    ).rejects.toThrow(/reports done, but no claude transcript[\s\S]*never ran it[\s\S]*Ask Codex/);
+    expect(calls.some((args) => commandKey(args) === "pane close")).toBe(true);
+  });
+
+  test("an idle verdict is kept when a transcript written after the prompt records it", async () => {
+    const seen: unknown[] = [];
+    // The first read answers the delivery poll; the settled read carries the session id.
+    let gets = 0;
+    const sessionGet = () =>
+      jsonResult({
+        id: "cli:agent:get",
+        result: {
+          agent: {
+            agent: "claude",
+            agent_status: gets++ === 0 ? "done" : "idle",
+            name: "ci-explorer",
+            agent_session: { kind: "id", value: "abc-123" },
+          },
+        },
+      });
+    const { calls, exec } = scriptedExec({ ...happyPath(), "agent get": sessionGet });
+    const before = Date.now();
+    const result = await dispatch({ ...options, wait: true }, herdrEnv, exec, (query) => {
+      seen.push(query);
+      return true;
+    });
+    expect(result).toMatchObject({ status: "idle" });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ kind: "claude", sessionId: "abc-123" });
+    const query = seen[0] as { prompt: string; since: number };
+    expect(query.prompt.endsWith("ping")).toBe(true);
+    expect(query.since).toBeLessThanOrEqual(before);
+    expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("a working verdict needs no transcript yet", async () => {
+    const { exec } = scriptedExec({
+      ...happyPath(),
+      "agent wait": (args) =>
+        args.includes("--until")
+          ? waitOk
+          : failed('{"error":{"code":"timeout","message":"timed out"},"id":"cli:agent:wait"}'),
+      "agent get": getStatus("working"),
+      "agent read": textResult("Contemplating...\n"),
+    });
+    const result = await dispatch({ ...options, wait: true }, herdrEnv, exec, () => false);
+    expect(result).toMatchObject({ status: "working" });
+  });
+
   test("a wait failure that is not a timeout propagates and leaves the pane", async () => {
     const { calls, exec } = scriptedExec({
       ...happyPath(),
@@ -647,6 +708,57 @@ describe("herdr-dispatch worker environment", () => {
       expect(plan.profile).toBe("claude-main");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("herdr-dispatch turn evidence", () => {
+  test("the needle is the prompt's first line after the read-only prefix, JSON-escaped", () => {
+    expect(promptNeedle(applyReadonlyPrompt('# Task "one"\nbody', true))).toBe('# Task \\"one\\"');
+    expect(promptNeedle("\n\nSecond line first\nmore")).toBe("Second line first");
+    expect(promptNeedle("x".repeat(200)).length).toBe(120);
+  });
+
+  test("a codex rollout written after the prompt that quotes it is evidence; older or silent files are not", () => {
+    const home = mkdtempSync(join(tmpdir(), "pstack-herdr-evidence-"));
+    try {
+      const day = join(home, ".codex", "sessions", "2026", "09", "16");
+      mkdirSync(day, { recursive: true });
+      const since = Date.now() - 1000;
+      const prompt = "# PARK-1: rename the flag\n\nDo the work.";
+      const line = JSON.stringify({ payload: { type: "message", role: "user", content: [{ type: "input_text", text: prompt }] } });
+      const stale = join(day, "rollout-old.jsonl");
+      writeFileSync(stale, `${line}\n`);
+      const old = new Date(since - 60_000);
+      utimesSync(stale, old, old);
+      const query = { kind: "codex" as const, prompt, since, env: {}, home };
+      expect(turnEvidence(query)).toBe(false);
+      writeFileSync(join(day, "rollout-silent.jsonl"), `${JSON.stringify({ payload: { type: "session_meta" } })}\n`);
+      expect(turnEvidence(query)).toBe(false);
+      writeFileSync(join(day, "rollout-live.jsonl"), `${line}\n`);
+      expect(turnEvidence(query)).toBe(true);
+      expect(turnEvidence({ ...query, prompt: "# PARK-2: something else" })).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("a claude worker is pinned to its own session transcript under the configured home", () => {
+    const home = mkdtempSync(join(tmpdir(), "pstack-herdr-evidence-"));
+    try {
+      const projects = join(home, "claude-alt", "projects", "-Users-me-repo");
+      mkdirSync(projects, { recursive: true });
+      const prompt = "Review the diff.\nDetails follow.";
+      const line = JSON.stringify({ type: "user", message: { role: "user", content: prompt } });
+      writeFileSync(join(projects, "other.jsonl"), `${line}\n`);
+      const since = Date.now() - 1000;
+      const env = { CLAUDE_CONFIG_DIR: join(home, "claude-alt") };
+      expect(turnEvidence({ kind: "claude", prompt, since, sessionId: "mine", env, home })).toBe(false);
+      writeFileSync(join(projects, "mine.jsonl"), `${line}\n`);
+      expect(turnEvidence({ kind: "claude", prompt, since, sessionId: "mine", env, home })).toBe(true);
+      expect(turnEvidence({ kind: "claude", prompt, since, env, home })).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });
