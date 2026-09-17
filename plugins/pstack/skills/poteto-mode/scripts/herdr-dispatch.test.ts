@@ -56,6 +56,7 @@ const options: DispatchOptions = {
   prompt: "ping",
   cwd: process.cwd(),
   wait: false,
+  keepPane: false,
   readonly: true,
   direction: "right",
   placement: "split",
@@ -311,8 +312,8 @@ const happyPath = () => ({
 const noDelay = { ...herdrEnv, PSTACK_HERDR_DELIVERY_WINDOW_MS: "0" };
 
 describe("herdr-dispatch Herdr sequence", () => {
-  test("passes the timeout to agent start and to the agent wait after the prompt", async () => {
-    const { calls, exec } = scriptedExec(happyPath());
+  test("passes the timeout and closes a completed worker after reading its output", async () => {
+    const { calls, exec } = scriptedExec({ ...happyPath(), "pane close": closeOk });
     const result = await dispatch(
       { ...options, wait: true, timeout: 45000, readonly: false },
       herdrEnv,
@@ -324,6 +325,7 @@ describe("herdr-dispatch Herdr sequence", () => {
       pane: "w1:p2",
       status: "idle",
       blocked: false,
+      paneClosed: true,
       output: "worker output",
     });
     const start = calls.find((args) => commandKey(args) === "agent start");
@@ -335,7 +337,21 @@ describe("herdr-dispatch Herdr sequence", () => {
     expect(start[timeoutAt + 1]).toBe("45000");
     expect(dash === -1 || timeoutAt < dash).toBe(true);
     expect(prompt).not.toContain("--wait");
-    expect(calls.at(-3)).toEqual(["agent", "wait", "ci-explorer", "--timeout", "45000"]);
+    expect(calls.find((args) => commandKey(args) === "agent wait" && !args.includes("--until"))).toEqual(
+      ["agent", "wait", "ci-explorer", "--timeout", "45000"]
+    );
+    expect(calls.map(commandKey).slice(-2)).toEqual(["agent read", "pane close"]);
+  });
+
+  test("--keep-pane retains a completed worker for inspection", async () => {
+    const { calls, exec } = scriptedExec(happyPath());
+    const result = await dispatch(
+      { ...options, wait: true, keepPane: true },
+      herdrEnv,
+      exec,
+      () => true
+    );
+    expect(result).toMatchObject({ status: "idle", paneClosed: false, output: "worker output" });
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
   });
 
@@ -563,8 +579,32 @@ describe("herdr-dispatch Herdr sequence", () => {
     });
     const result = await dispatch({ ...options, wait: true }, herdrEnv, exec);
     expect(waits).toBe(2);
-    expect(result).toMatchObject({ status: "working", blocked: false, output: "Contemplating..." });
+    expect(result).toMatchObject({
+      status: "working",
+      blocked: false,
+      paneClosed: false,
+      output: "Contemplating...",
+    });
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("blocked and unknown workers stay open", async () => {
+    for (const status of ["blocked", "unknown"] as const) {
+      const { calls, exec } = scriptedExec({
+        ...happyPath(),
+        "agent get": getAfterPrompt("working", status),
+      });
+      const result = await dispatch({ ...options, wait: true }, herdrEnv, exec);
+      expect(result).toMatchObject({ status, paneClosed: false });
+      expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+    }
+  });
+
+  test("reports a completed-worker cleanup failure", async () => {
+    const { exec } = scriptedExec({ ...happyPath(), "pane close": failed("close failed") });
+    await expect(
+      dispatch({ ...options, wait: true }, herdrEnv, exec, () => true)
+    ).rejects.toThrow(/close failed/);
   });
 
   test("a done verdict without a transcript of the prompt is a failed run, not a result", async () => {
@@ -580,7 +620,7 @@ describe("herdr-dispatch Herdr sequence", () => {
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(true);
   });
 
-  test("an idle verdict is kept when a transcript written after the prompt records it", async () => {
+  test("a verified idle verdict closes after its output is read", async () => {
     const seen: unknown[] = [];
     // The first read answers the delivery poll; the settled read carries the session id.
     let gets = 0;
@@ -596,19 +636,23 @@ describe("herdr-dispatch Herdr sequence", () => {
           },
         },
       });
-    const { calls, exec } = scriptedExec({ ...happyPath(), "agent get": sessionGet });
+    const { calls, exec } = scriptedExec({
+      ...happyPath(),
+      "agent get": sessionGet,
+      "pane close": closeOk,
+    });
     const before = Date.now();
     const result = await dispatch({ ...options, wait: true }, herdrEnv, exec, (query) => {
       seen.push(query);
       return true;
     });
-    expect(result).toMatchObject({ status: "idle" });
+    expect(result).toMatchObject({ status: "idle", paneClosed: true });
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ kind: "claude", sessionId: "abc-123" });
     const query = seen[0] as { prompt: string; since: number };
     expect(query.prompt.endsWith("ping")).toBe(true);
     expect(query.since).toBeLessThanOrEqual(before);
-    expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+    expect(calls.map(commandKey).at(-1)).toBe("pane close");
   });
 
   test("a working verdict needs no transcript yet", async () => {

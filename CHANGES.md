@@ -1,5 +1,11 @@
 # CHANGES — applied substitutions
 
+## 0.9.34 - close completed Herdr workers
+
+`herdr-dispatch.ts --wait` now closes a verified `done` or `idle` worker after reading its output. Settled results report `paneClosed`, and `--keep-pane` retains a completed worker for inspection. `working`, `blocked`, and `unknown` workers stay open. A completed-worker cleanup failure makes the dispatch fail instead of returning a result with a leaked pane.
+
+The unit suite covers every lifecycle state, the opt-out, and cleanup failure. The real Herdr end-to-end test now proves that the completed worker no longer exists. The README and Herdr execution mapping describe the same lifecycle.
+
 ## 0.9.33 - sync pstack through 5bf2b154
 
 The pstack upstream pin moves from `e8d856f` to `5bf2b1544db739998121a306340631963c2ff3de`, the latest commit touching `cursor/plugins/pstack` at sync time. This carries the September prose-density cleanup, evidence-or-label reply rule, operator-neutral wording and in-chat status tick, and the code-role default update. The upstream setup reasoning-budget prompt is intentionally not adopted because this fork already configures model and effort independently per Herdr worker profile.

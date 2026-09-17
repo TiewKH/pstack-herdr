@@ -89,9 +89,13 @@ cat "$RESULT"
 jq -e '.kind == "claude"' "$RESULT" >/dev/null
 jq -e '.status == "idle" or .status == "done"' "$RESULT" >/dev/null
 jq -e '.blocked == false' "$RESULT" >/dev/null
+jq -e '.paneClosed == true' "$RESULT" >/dev/null
 grep -q 'FAKE_CLAUDE_RESULT:pstack-herdr-e2e' "$RESULT"
 
-agent="$(herdr agent get ci-explorer)"
-printf '%s\n' "$agent" | jq -e '.result.agent.agent == "claude"' >/dev/null
+if agent="$(herdr agent get ci-explorer 2>&1)"; then
+  echo "completed worker still exists after dispatch" >&2
+  exit 1
+fi
+printf '%s\n' "$agent" | jq -e '.error.code == "agent_not_found"' >/dev/null
 
 printf 'Real Herdr end-to-end dispatch passed with Herdr v%s\n' "$HERDR_VERSION"
