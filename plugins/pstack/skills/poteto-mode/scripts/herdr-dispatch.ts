@@ -27,6 +27,7 @@ export interface DispatchOptions {
   model?: string;
   effort?: string;
   wait: boolean;
+  keepPane: boolean;
   timeout?: number;
   readonly: boolean;
   direction: "right" | "down";
@@ -47,6 +48,7 @@ export interface DispatchHandle {
 export interface DispatchSettled extends DispatchHandle {
   status: AgentStatus;
   blocked: boolean;
+  paneClosed: boolean;
   output: string;
 }
 
@@ -716,7 +718,9 @@ export async function dispatch(
           ["agent", "read", options.name, "--source", "recent-unwrapped", "--lines", "240"],
           exec
         );
-  return { ...handle, status, blocked: status === "blocked", output };
+  const paneClosed = (status === "done" || status === "idle") && !options.keepPane;
+  if (paneClosed) await runHerdrCommand(["pane", "close", pane], exec);
+  return { ...handle, status, blocked: status === "blocked", paneClosed, output };
 }
 
 async function main(): Promise<void> {
@@ -734,6 +738,7 @@ async function main(): Promise<void> {
     .option("--model <slug>", "override model passed to the worker CLI")
     .option("--effort <level>", "override reasoning effort passed to the worker CLI")
     .option("--wait", "wait for settled worker state and read output", false)
+    .option("--keep-pane", "keep a completed worker pane open after --wait", false)
     .option(
       "--timeout <ms>",
       "timeout in milliseconds for agent start and --wait",
