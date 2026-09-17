@@ -52,7 +52,7 @@ The design goals are:
 | Layer | Responsibility |
 | --- | --- |
 | **pstack** | decomposition, semantic roles, playbooks, worktree/isolation policy, synthesis, review, verification |
-| **`herdr-dispatch.ts`** | pane creation, profile environment, CLI startup, prompt delivery and its confirmation, lifecycle waiting, output reads, recursive depth |
+| **`herdr-dispatch.ts`** | pane creation, profile environment, CLI startup, prompt delivery and its confirmation, lifecycle waiting, output reads, completed-worker cleanup, recursive depth |
 | **`hooks/herdr-agent-gate.sh`** | on Claude Code, denies the native `Agent` tool while `HERDR_ENV=1` and points at the dispatcher |
 | **Herdr** | terminal panes, agent lifecycle/status, visibility, interaction |
 | **Claude Code / Codex** | execution of delegated work |
@@ -228,7 +228,9 @@ bun <poteto-mode>/scripts/herdr-dispatch.ts \
 
 `--timeout` / `orchestration.default_timeout_ms` supplies the budget for Herdr agent startup (at most the 300000 ms Herdr accepts) and for the wait after the prompt. The dispatcher waits for the worker to report idle before typing, then counts the prompt delivered once the agent leaves idle, retrying once. A prompt that never lands is an error carrying the worker's last screen, and so is a rejected prompt; both close the pane.
 
-For parallel fan-out, launch all dispatcher processes before waiting. A Herdr state of `blocked` is not completion; inspect the worker for an approval or question. `unknown` likewise must not be treated as successful completion. `working` means the wait budget ran out with the worker still running; the pane stays open, so poll it with `herdr agent wait <name>`.
+With `--wait`, the dispatcher reads the output and closes a verified `done` or `idle` worker. The result sets `paneClosed` to `true`. Pass `--keep-pane` to retain a completed worker for inspection. A cleanup failure makes the dispatch fail.
+
+For parallel fan-out, launch all dispatcher processes before waiting. A Herdr state of `blocked` is not completion; inspect the worker for an approval or question. `unknown` likewise must not be treated as successful completion. `working`, `blocked`, and `unknown` panes stay open. Poll them with `herdr agent wait <name>`.
 
 ### The Agent gate
 
