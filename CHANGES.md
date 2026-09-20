@@ -2,6 +2,12 @@
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
+## 0.9.36 - Babysit confirms the first status read
+
+This is a deliberate local fork. Preserve it during upstream sync.
+
+The Babysit playbook took a PR number or a status from the request and never said to check that the first status read was about that PR or stack. Step 2 makes the merge frontier the only PR that matters, but no step said to name it before acting. Step 6 now says to confirm that the PR or stack the first status read reports matches the request, and to name the current merge frontier. The sentence adds no command. On GitHub the watcher already answers both: `--stack` follows the connected open stack from one `--pr`, and its verdict carries `frontier`. A request may name a stack by any PR in it, so the requested PR does not have to be the frontier. Step 1 stays identical to upstream.
+
 ## 0.9.35 - route Codex sessions through pstack
 
 The bundled `SessionStart` hook now runs on both Claude Code and Codex. A runtime-aware executable reads `session hook` from `~/.claude/pstack-models.md` or `~/.codex/pstack-models.md`, while the Codex manifest explicitly declares the shared hook and includes resume events. The setup skill, Codex mapping, README, and reference explain Codex's `/hooks` trust step and the difference between native-plugin and skills-only installs. Tests execute the shipped command under both runtime environments and cover missing, on, and off settings. The README now leads with installation, a first task, and a workflow diagram; the slash-command table, runtime notes, dependencies, and maintenance documentation move to `docs/reference.md`, which the generator reads for the Codex prompt stubs. The upstream pin remains at `e8d856f`.
