@@ -409,12 +409,15 @@ export function applyRegions(file, text, models, { strict = true } = {}) {
   return lines.join("\n");
 }
 
-// A role's "models" is a list of slugs or the string "panel", which resolves to
-// the shared diverse-model panel so the panel is written once.
+// A role's "models" names a tier (default, strongest, panel) or lists slugs.
+// A tier resolves to its models and stays on the role as `tier`, so moving a
+// tier is one edit and the Codex mapping can follow the same keys.
 export function resolveModels(models) {
   return {
     ...models,
-    roles: models.roles.map((r) => (r.models === "panel" ? { ...r, models: models.panel } : r)),
+    roles: models.roles.map((r) =>
+      typeof r.models === "string" ? { ...r, tier: r.models, models: [models.tiers[r.models]].flat() } : r,
+    ),
   };
 }
 
@@ -457,12 +460,11 @@ export function modelsSection(roles) {
 }
 
 export function setupModelsSection(models) {
-  const avail = models.available.map((m) => `${m.label} (${code(m.slug)})`).join(", ");
   return (
     "Stamped from `plugins/pstack/models.json` (edit there, rerun `tools/generate.mjs`).\n\n" +
-    `- Available Claude models: ${avail}\n` +
-    `- Default panel: ${codeList(models.panel)}\n` +
-    `- Single-role default: ${code(models.singleRoleDefault)}`
+    `- Available Claude models: ${codeList(models.available)}\n` +
+    `- Default panel: ${codeList(models.tiers.panel)}\n` +
+    `- Single-role default: ${code(models.tiers.default)}`
   );
 }
 
@@ -484,16 +486,14 @@ export function overrideSheetBlock(models) {
 }
 
 export function codexModelNamesSection(models) {
-  const strongest = models.roles.filter(
-    (r) => r.models.length === 1 && r.models[0] !== models.singleRoleDefault,
-  );
+  const strongest = models.roles.filter((r) => r.tier === "strongest");
   return (
     "Skills name Claude defaults (a single-role default for code/prose/judgment plus a diverse-model panel for " +
     "diverse-model panels; each model-consuming skill lists its own in a Models section). These slugs do not " +
     "resolve on Codex. Substitute your configured Codex models:\n\n" +
-    `- Single-model roles: your primary Codex model (for example ${code(models.codex.singleRoleExample)}).\n` +
+    `- Single-model roles: your primary Codex model (for example ${code(models.codex.default)}).\n` +
     `- Roles that default to the strongest Claude model (${strongest.map((r) => code(r.role)).join(", ")}): ` +
-    `your strongest Codex model (for example ${code(models.codex.strongestRoleExample)}).\n` +
+    `your strongest Codex model (for example ${code(models.codex.strongest)}).\n` +
     "- Diverse-model panels (`arena`, `architect`, `interrogate`, `how` critics, `reflect`): the adversarial " +
     "signal comes from model diversity, so use the distinct Codex models available to you. A good default panel " +
     `on ChatGPT is ${codeList(models.codex.panel)}. If only one model family is reachable, vary reasoning ` +
@@ -502,11 +502,12 @@ export function codexModelNamesSection(models) {
   );
 }
 
-// After stamping, no claude-* model slug may survive in skill prose outside
-// the regions the generator owns in that file.
-const SLUG_RE = /claude-(?:opus|fable|sonnet|haiku)[0-9a-z.-]*/;
-
+// After stamping, skill prose outside the regions the generator owns may name
+// no model: a full claude-* ID is rejected by the Agent tool, and a backticked
+// family name hard-codes a default that belongs in models.json.
 export function strayModelSlugs(file, text, models) {
+  const families = models.available.join("|");
+  const SLUG_RE = new RegExp(`claude-(?:${families})[0-9a-z.-]*|\`(?:${families})\``);
   const lines = text.split("\n");
   const owned = regions(models)
     .filter((r) => r.file === file)
@@ -585,7 +586,7 @@ function main() {
   );
   if (strays.length) {
     throw new Error(
-      `claude-* model slugs outside generator-owned regions (move the fact into models.json or reference the role):\n` +
+      `model names outside generator-owned regions (reference the role and its Models section instead):\n` +
         strays.join("\n"),
     );
   }
