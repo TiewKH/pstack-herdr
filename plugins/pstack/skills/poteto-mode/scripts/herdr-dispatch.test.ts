@@ -6,6 +6,7 @@ import { loadRoutes, parseRoutes, type RoutesConfig } from "./herdr-config.ts";
 import {
   agentStatus,
   applyReadonlyPrompt,
+  collect,
   dispatch,
   effortAgentArgs,
   envFlags,
@@ -692,6 +693,80 @@ describe("herdr-dispatch Herdr sequence", () => {
       /agent_not_found/
     );
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("reports the pane before starting the agent, so an interrupted dispatch can close it", async () => {
+    const order: string[] = [];
+    const { exec } = scriptedExec({
+      ...happyPath(),
+      "agent start": () => {
+        order.push("agent start");
+        return startOk;
+      },
+    });
+    await dispatch(options, herdrEnv, exec, () => true, (pane) => order.push(`pane ${pane}`));
+    expect(order).toEqual(["pane w1:p2", "agent start"]);
+  });
+});
+
+const codexGet = (status: string): CommandResult =>
+  jsonResult({
+    id: "cli:agent:get",
+    result: {
+      agent: { agent: "codex", agent_status: status, name: "ci-review", pane_id: "w1:p7" },
+    },
+  });
+const collectOptions = { name: "ci-review", keepPane: false, timeout: 60000, routes: emptyRoutes };
+
+describe("herdr-dispatch collect", () => {
+  test("a handed-off worker that finishes is read, then its pane is closed", async () => {
+    let gets = 0;
+    const { calls, exec } = scriptedExec({
+      "agent get": () => codexGet(gets++ === 0 ? "working" : "done"),
+      "agent wait": waitOk,
+      "agent read": readOk,
+      "pane close": closeOk,
+    });
+    const result = await collect(collectOptions, herdrEnv, exec);
+    expect(result).toEqual({
+      agent: "ci-review",
+      pane: "w1:p7",
+      kind: "codex",
+      status: "done",
+      blocked: false,
+      paneClosed: true,
+      output: "worker output",
+    });
+    expect(calls).toContainEqual(["agent", "wait", "ci-review", "--timeout", "60000"]);
+    expect(calls.at(-1)).toEqual(["pane", "close", "w1:p7"]);
+  });
+
+  test("a worker still running when the budget ends stays open", async () => {
+    const { calls, exec } = scriptedExec({
+      "agent get": codexGet("working"),
+      "agent wait": failed('{"error":{"code":"timeout","message":"timed out"},"id":"cli:agent:wait"}'),
+      "agent read": textResult("Exploring...\n"),
+    });
+    const result = await collect(collectOptions, herdrEnv, exec);
+    expect(result).toMatchObject({ status: "working", paneClosed: false, output: "Exploring..." });
+    expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("--keep-pane keeps a collected worker open", async () => {
+    const { calls, exec } = scriptedExec({
+      "agent get": codexGet("done"),
+      "agent wait": waitOk,
+      "agent read": readOk,
+    });
+    const result = await collect({ ...collectOptions, keepPane: true }, herdrEnv, exec);
+    expect(result).toMatchObject({ status: "done", paneClosed: false });
+    expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("collect refuses to run outside Herdr", async () => {
+    const { calls, exec } = scriptedExec({});
+    await expect(collect(collectOptions, {}, exec)).rejects.toThrow(/HERDR_ENV=1/);
+    expect(calls).toEqual([]);
   });
 });
 
