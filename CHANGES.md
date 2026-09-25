@@ -1,5 +1,11 @@
 # CHANGES — applied substitutions
 
+## 0.9.45 - Herdr setup lists versioned worker IDs
+
+The 0.9.44 merge replaced setup-pstack's list of versioned Claude slugs with the four family names the `Agent` tool accepts. Herdr routes never go through that tool: the dispatcher passes a profile's `model` straight to the worker CLI, which accepts full IDs and runs them as that exact version. A family name runs whichever model is current in that family, so a Herdr setup run that took its menu from the family names would stop pinning versions.
+
+`plugins/pstack/models.json` now carries a `herdr` block of labelled Claude and Codex worker IDs, and the generator stamps them into setup-pstack's Models section as "Label (`id`)". The Claude list is Opus 5.5, Opus 5, Opus 4.8, Opus 4.6, Fable 5.1, Fable 5, Sonnet 5, Sonnet 4.6, and Haiku 4.5. The Codex list is GPT-6-Sol, GPT-6-Astra, GPT-6-Luna, GPT-5.6-Sol, GPT-5.6-Terra, GPT-5.6-Luna, and GPT-5.5, the models Codex CLI 0.156.1 lists. Each ID answered `OK` through `claude -p --model <id>` or `codex exec -m <id>` on 25 Sep 2026. Herdr setup step 1 offers that list as the menu, says how to confirm an ID, and says to write full IDs into profiles. `config/setup.example.json` moves its strong profile to `claude-opus-5-5`.
+
 ## 0.9.44 - merge pstack-claude 0.9.43, close handed-off and interrupted Herdr workers
 
 This release merges `michael-denyer/pstack-claude` through 0.9.43 into the fork. That brings the upstream sync to `cursor/plugins` `12d587d`, model tiers named the way the `Agent` tool accepts them (`opus`, `fable`, `sonnet`), the Babysit, watch-pr, sync, and worktree-audit fixes, and the macOS fixture-path fix for `worktree-audit.test.mjs`. The fork and pstack-claude both released 0.9.30 to 0.9.34 with different contents, so those headings below name their line. The version jumps to 0.9.44 so installed copies on either line refresh.
