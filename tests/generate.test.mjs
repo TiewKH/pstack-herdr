@@ -14,7 +14,7 @@ import {
   loadModels,
   promptStub,
   publicSkills,
-  readmeCommands,
+  slashCommands,
   regions,
   section,
   stampVersion,
@@ -37,12 +37,16 @@ describe("locators", () => {
     expect(section("Absent")(doc)).toBeNull();
   });
 
-  test("fenceUnder spans the inside of the first matching fence after the heading", () => {
+  test("fenceUnder spans the inside of the first matching fence after the titled step, whatever its number", () => {
     const doc = lines("### 5. Write the override sheet\n\ntext\n```markdown\na\nb\n```\nafter");
-    expect(fenceUnder("### 5. Write", "markdown")(doc)).toEqual([4, 6]);
-    expect(fenceUnder("### 5. Write", "yaml")(doc)).toBeNull();
-    expect(fenceUnder("### 9.", "markdown")(doc)).toBeNull();
-    expect(fenceUnder("### 5. Write", "markdown")(lines("### 5. Write\n```markdown\nunclosed"))).toBeNull();
+    const renumbered = lines("### 6. Write the override sheet\n```markdown\na\n```");
+    const unclosed = lines("### 5. Write the override sheet\n```markdown\nunclosed");
+    expect(fenceUnder("Write the override sheet", "markdown")(doc)).toEqual([4, 6]);
+    expect(fenceUnder("Write the override sheet", "markdown")(renumbered)).toEqual([2, 3]);
+    expect(fenceUnder("Write the override sheet", "yaml")(doc)).toBeNull();
+    expect(fenceUnder("Write", "markdown")(doc)).toBeNull();
+    expect(fenceUnder("Absent", "markdown")(doc)).toBeNull();
+    expect(fenceUnder("Write the override sheet", "markdown")(unclosed)).toBeNull();
   });
 
   test("tableRows spans the consecutive rows with the prefix after the separator", () => {
@@ -103,6 +107,13 @@ describe("strayModelSlugs", () => {
     const strays = strayModelSlugs(file, text, models);
     expect(strays).toHaveLength(1);
     expect(strays[0]).toContain("Prefer claude-sonnet-4-6.");
+  });
+
+  test("a backticked family name outside an owned region is a stray", () => {
+    const text = "# other\n\nDelegate to `fable` for this.\n";
+    expect(strayModelSlugs("plugins/pstack/skills/other/SKILL.md", text, models)).toEqual([
+      "plugins/pstack/skills/other/SKILL.md:3: Delegate to `fable` for this.",
+    ]);
   });
 });
 
@@ -184,33 +195,67 @@ describe("validateHooks", () => {
   });
 });
 
-describe("readmeCommands", () => {
-  const readme = (rows) => `# R\n\n| command | use it when |\n| --- | --- |\n${rows.join("\n")}\n\nafter\n`;
+describe("slashCommands", () => {
+  const reference = (rows) => `# R\n\n| command | use it when |\n| --- | --- |\n${rows.join("\n")}\n\nafter\n`;
 
   test("reads name and menu text in row order", () => {
-    const text = readme(["| `/b` | second thing |", "| `/a` | first thing |"]);
-    expect(readmeCommands(text, ["a", "b"])).toEqual([
+    const text = reference(["| `/b` | second thing |", "| `/a` | first thing |"]);
+    expect(slashCommands(text, ["a", "b"])).toEqual([
       { name: "b", menu: "second thing" },
       { name: "a", menu: "first thing" },
     ]);
   });
 
   test("names a skill without a row and a row without a skill", () => {
-    expect(() => readmeCommands(readme(["| `/a` | x |", "| `/gone` | y |"]), ["a", "new"])).toThrow(
+    expect(() => slashCommands(reference(["| `/a` | x |", "| `/gone` | y |"]), ["a", "new"])).toThrow(
       "row without a skill: gone; skill without a row: new",
     );
   });
 
   test("rejects a malformed row and a missing table", () => {
-    expect(() => readmeCommands(readme(["| /a | x |"]), ["a"])).toThrow("row 1 is not");
-    expect(() => readmeCommands("# R\n\nno table\n", ["a"])).toThrow("table header not found");
+    expect(() => slashCommands(reference(["| /a | x |"]), ["a"])).toThrow("row 1 is not");
+    expect(() => slashCommands("# R\n\nno table\n", ["a"])).toThrow("table header not found");
   });
 
-  test("the live README names exactly the public skills", () => {
-    const text = readFileSync(join(repoRoot, "README.md"), "utf8");
-    const rows = readmeCommands(text, publicSkills(join(repoRoot, "plugins/pstack/skills")));
+  test("rejects menu text that the prompt's YAML frontmatter would not read back, naming file and row", () => {
+    expect(() => slashCommands(reference(["| `/a` | fine |", "| `/b` | fix CI: then ship |"]), ["a", "b"])).toThrow(
+      "docs/reference.md: slash-command row 2 text is not a plain YAML value",
+    );
+    const samples = [
+      "fix CI: then ship",
+      "run it # carefully",
+      "ends with colon:",
+      "`/x` first",
+      "*star",
+      "[a] b",
+      "- item",
+      "a:b ratio, issue#12, [x] {y}",
+      "-mode skill",
+      "monitor an open PR, fix CI/comments, keep it merge-ready",
+    ];
+    for (const menu of samples) {
+      let parsed;
+      try {
+        parsed = Bun.YAML.parse(promptStub({ name: "b", menu }).split("---\n")[1]).description;
+      } catch {}
+      let accepted = true;
+      try {
+        slashCommands(reference([`| \`/b\` | ${menu} |`]), ["b"]);
+      } catch {
+        accepted = false;
+      }
+      expect({ menu, accepted }).toEqual({ menu, accepted: parsed === menu });
+    }
+  });
+
+  test("the live reference names exactly the public skills and matches the generated prompts", () => {
+    const text = readFileSync(join(repoRoot, "docs/reference.md"), "utf8");
+    const rows = slashCommands(text, publicSkills(join(repoRoot, "plugins/pstack/skills")));
     expect(rows[0].name).toBe("poteto-mode");
-    for (const row of rows) expect(promptStub(row)).toContain(`description: ${row.menu}\n`);
+    for (const row of rows) {
+      const prompt = readFileSync(join(repoRoot, "plugins/pstack/.codex-plugin/prompts", `${row.name}.md`), "utf8");
+      expect(prompt).toBe(promptStub(row));
+    }
   });
 });
 

@@ -4,7 +4,7 @@
 
 `pstack-herdr` is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude) that preserves pstack's rigorous engineering workflows while adding [Herdr](https://github.com/herdrdev/herdr) as the structural runtime for delegated agents.
 
-The fork currently contains 54 Agent Skills: 31 public skills and 23 `principle-*` leaves. It is synced against upstream `5bf2b154` from `cursor/plugins/pstack`, with Herdr-specific port changes layered on top.
+The fork currently contains 54 Agent Skills: 31 public skills and 23 `principle-*` leaves. It is synced against upstream `12d587d` from `cursor/plugins/pstack`, with Herdr-specific port changes layered on top.
 
 When the coordinator runs inside Herdr (`HERDR_ENV=1`), delegation-heavy pstack workflows launch real Claude Code or Codex processes in Herdr panes. Workers are visible, independently routable, and can participate in bounded recursive delegation. Outside Herdr, the inherited Claude Code and Codex behavior remains available.
 
@@ -230,7 +230,7 @@ bun <poteto-mode>/scripts/herdr-dispatch.ts \
 
 With `--wait`, the dispatcher reads the output and closes a verified `done` or `idle` worker. The result sets `paneClosed` to `true`. Pass `--keep-pane` to retain a completed worker for inspection. A cleanup failure makes the dispatch fail.
 
-For parallel fan-out, launch all dispatcher processes before waiting. A Herdr state of `blocked` is not completion; inspect the worker for an approval or question. `unknown` likewise must not be treated as successful completion. `working`, `blocked`, and `unknown` panes stay open. Poll them with `herdr agent wait <name>`.
+For parallel fan-out, launch all dispatcher processes before waiting. A Herdr state of `blocked` is not completion; inspect the worker for an approval or question. `unknown` likewise must not be treated as successful completion. `working`, `blocked`, and `unknown` panes stay open. Finish a `working` one with `herdr-dispatch.ts --collect --name <name>`: it waits, reads the output, and closes the pane once the worker is done. A dispatch or `--collect` stopped by SIGTERM, SIGINT, or SIGHUP while it waits closes the worker's pane before it exits.
 
 ### The Agent gate
 

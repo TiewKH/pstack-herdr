@@ -70,7 +70,13 @@ When the prompt is not accepted or not delivered, the dispatcher reads the worke
 
 With `--wait`, the dispatcher returns JSON containing the Herdr agent name, pane, selected profile, kind, nesting depth, lifecycle status, blocked flag, `paneClosed`, and recent agent output. A verified `done` or `idle` worker closes after the dispatcher reads its output. Pass `--keep-pane` to retain one for inspection. A cleanup failure makes the dispatch fail instead of reporting a result with a leaked pane.
 
-`blocked: true` is not completion. Inspect the worker in Herdr and resolve the approval or question. `unknown` is not proof of completion; it is the status Herdr reported. `working` means the wait budget ran out with the worker still running. The dispatcher leaves `working`, `blocked`, and `unknown` panes open. Poll one with `herdr agent wait <name> --timeout <ms>` and read it with `herdr agent read <name> --source recent-unwrapped`, or close it with `herdr pane close <pane>` if the work is no longer wanted.
+`blocked: true` is not completion. Inspect the worker in Herdr and resolve the approval or question. `unknown` is not proof of completion; it is the status Herdr reported. `working` means the wait budget ran out with the worker still running. The dispatcher leaves `working`, `blocked`, and `unknown` panes open. Finish a `working` worker through the dispatcher, not raw `herdr` commands, so its pane closes when it is done:
+
+```bash
+bun <poteto-mode>/scripts/herdr-dispatch.ts --collect --name <agent-name> --timeout <ms>
+```
+
+It returns the same settled JSON without `profile` and `depth`, and leaves the pane open again if the worker is still running when the budget ends. Close a pane with `herdr pane close <pane>` only when the work is no longer wanted. A dispatcher stopped by SIGTERM, SIGINT, or SIGHUP while it waits on a worker, in a dispatch or a `--collect`, closes that worker's pane before it exits; SIGKILL cannot be caught and still leaks the pane.
 
 `--timeout` and `orchestration.default_timeout_ms` are one budget applied to `agent start` readiness (at most the 300000 ms Herdr accepts) and to the `agent wait` that follows a prompt. Before typing, the dispatcher waits for the worker to report idle, then counts the prompt delivered once the agent leaves idle (`working`, `blocked`, or `done`) within `PSTACK_HERDR_DELIVERY_WINDOW_MS` (default 8000), retrying the prompt once. A prompt that never lands is an error that carries the screen, never a `done` over an empty composer.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { constants, homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { ensureDependenciesInstalled } from "./bootstrap.ts";
 import {
@@ -45,14 +45,29 @@ export interface DispatchHandle {
   depth: number;
 }
 
-export interface DispatchSettled extends DispatchHandle {
+export interface Settlement {
   status: AgentStatus;
   blocked: boolean;
   paneClosed: boolean;
   output: string;
 }
 
+export interface DispatchSettled extends DispatchHandle, Settlement {}
+
 export type DispatchResult = DispatchHandle | DispatchSettled;
+
+export interface CollectOptions {
+  name: string;
+  timeout?: number;
+  keepPane: boolean;
+  routes?: string;
+}
+
+export interface CollectResult extends Settlement {
+  agent: string;
+  pane: string;
+  kind: AgentKind;
+}
 
 export interface CommandResult {
   stdout: string;
@@ -340,10 +355,25 @@ export function paneId(payload: unknown, placement: Placement = "split"): string
   return id;
 }
 
-export function agentStatus(payload: unknown): AgentStatus {
+function agentRecord(payload: unknown): Record<string, unknown> {
   const root = asObject(payload, "herdr agent get");
-  const agent = asObject(asObject(root.result, "result").agent, "result.agent");
-  return parseAgentStatus(agent.agent_status);
+  return asObject(asObject(root.result, "result").agent, "result.agent");
+}
+
+export function agentStatus(payload: unknown): AgentStatus {
+  return parseAgentStatus(agentRecord(payload).agent_status);
+}
+
+function agentLocation(payload: unknown): { pane: string; kind: AgentKind } {
+  const agent = agentRecord(payload);
+  const pane = agent.pane_id;
+  if (typeof pane !== "string" || pane === "") {
+    throw new Error("herdr agent get returned no result.agent.pane_id");
+  }
+  if (agent.agent !== "claude" && agent.agent !== "codex") {
+    throw new Error(`herdr agent get returned an agent kind pstack cannot collect: ${String(agent.agent)}`);
+  }
+  return { pane, kind: agent.agent };
 }
 
 // Herdr reports a Claude worker's session id, which names its transcript file.
@@ -435,6 +465,14 @@ function resolvedPrompt(options: DispatchOptions): string {
   throw new Error("set --prompt or --prompt-file");
 }
 
+function defaultTimeout(config: RoutesConfig, timeout: number | undefined): number {
+  return (
+    optionalNonNegativeInt(timeout, "--timeout") ??
+    config.orchestration?.default_timeout_ms ??
+    180000
+  );
+}
+
 function depth(config: RoutesConfig, env: NodeJS.ProcessEnv = process.env): {
   current: number;
   next: number;
@@ -512,10 +550,7 @@ export function planDispatch(
   const config = loadRoutes(options.routes, env);
   const chosen = chooseProfile(config, options, env);
   const nesting = depth(config, env);
-  const timeout =
-    optionalNonNegativeInt(options.timeout, "--timeout") ??
-    config.orchestration?.default_timeout_ms ??
-    180000;
+  const timeout = defaultTimeout(config, options.timeout);
   const kind = chosen.profile.kind;
   const childEnv = {
     ...workerEnv(kind, chosen.profile.env, homedir(), env),
@@ -655,14 +690,45 @@ function withScreen(error: unknown, screen: string): Error {
   });
 }
 
+async function awaitSettled(name: string, timeout: number, exec: HerdrExec): Promise<unknown> {
+  try {
+    await runHerdrCommand(["agent", "wait", name, "--timeout", String(timeout)], exec);
+  } catch (error) {
+    if (!isWaitTimeout(error)) throw error;
+  }
+  return runHerdrJson(["agent", "get", name], exec);
+}
+
+async function finish(
+  name: string,
+  pane: string,
+  status: AgentStatus,
+  keepPane: boolean,
+  exec: HerdrExec
+): Promise<Settlement> {
+  // Herdr refuses an unwrapped read while the agent is working; the screen is all there is.
+  const output =
+    status === "working"
+      ? await visibleScreen(name, exec)
+      : await runHerdrText(
+          ["agent", "read", name, "--source", "recent-unwrapped", "--lines", "240"],
+          exec
+        );
+  const paneClosed = (status === "done" || status === "idle") && !keepPane;
+  if (paneClosed) await runHerdrCommand(["pane", "close", pane], exec);
+  return { status, blocked: status === "blocked", paneClosed, output };
+}
+
 export async function dispatch(
   options: DispatchOptions,
   env: NodeJS.ProcessEnv = process.env,
   exec: HerdrExec = spawnHerdr,
-  evidence: TurnEvidence = turnEvidence
+  evidence: TurnEvidence = turnEvidence,
+  onPane: (pane: string) => void = () => {}
 ): Promise<DispatchResult> {
   const plan = planDispatch(options, env);
   const pane = paneId(await runHerdrJson(plan.placeArgs, exec), options.placement);
+  onPane(pane);
   let promptedAt = Date.now();
   try {
     await startAgent(startArgs(options.name, pane, plan), exec);
@@ -683,12 +749,7 @@ export async function dispatch(
     depth: plan.depth,
   };
   if (!options.wait) return handle;
-  try {
-    await runHerdrCommand(["agent", "wait", options.name, "--timeout", String(plan.timeout)], exec);
-  } catch (error) {
-    if (!isWaitTimeout(error)) throw error;
-  }
-  const agent = await runHerdrJson(["agent", "get", options.name], exec);
+  const agent = await awaitSettled(options.name, plan.timeout, exec);
   const status = agentStatus(agent);
   if (status === "done" || status === "idle") {
     const ran = evidence({
@@ -710,17 +771,41 @@ export async function dispatch(
       );
     }
   }
-  // Herdr refuses an unwrapped read while the agent is working; the screen is all there is.
-  const output =
-    status === "working"
-      ? await visibleScreen(options.name, exec)
-      : await runHerdrText(
-          ["agent", "read", options.name, "--source", "recent-unwrapped", "--lines", "240"],
-          exec
-        );
-  const paneClosed = (status === "done" || status === "idle") && !options.keepPane;
-  if (paneClosed) await runHerdrCommand(["pane", "close", pane], exec);
-  return { ...handle, status, blocked: status === "blocked", paneClosed, output };
+  return { ...handle, ...(await finish(options.name, pane, status, options.keepPane, exec)) };
+}
+
+// A worker handed back as `working` already ran its prompt, so it needs no transcript check.
+export async function collect(
+  options: CollectOptions,
+  env: NodeJS.ProcessEnv = process.env,
+  exec: HerdrExec = spawnHerdr,
+  onPane: (pane: string) => void = () => {}
+): Promise<CollectResult> {
+  if (env.HERDR_ENV !== "1") throw new Error("herdr-dispatch requires HERDR_ENV=1");
+  const timeout = defaultTimeout(loadRoutes(options.routes, env), options.timeout);
+  const { pane, kind } = agentLocation(await runHerdrJson(["agent", "get", options.name], exec));
+  onPane(pane);
+  const status = agentStatus(await awaitSettled(options.name, timeout, exec));
+  return {
+    agent: options.name,
+    pane,
+    kind,
+    ...(await finish(options.name, pane, status, options.keepPane, exec)),
+  };
+}
+
+// An interrupted dispatch or collect closes its worker's pane; nobody is left to read it.
+function closeOnSignal(): (pane: string | undefined) => void {
+  let owned: string | undefined;
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
+    process.on(signal, () => {
+      if (owned) Bun.spawnSync(["herdr", "pane", "close", owned]);
+      process.exit(128 + constants.signals[signal]);
+    });
+  }
+  return (pane) => {
+    owned = pane;
+  };
 }
 
 async function main(): Promise<void> {
@@ -728,7 +813,7 @@ async function main(): Promise<void> {
   const { Command } = await import("commander");
   const program = new Command("herdr-dispatch")
     .description("Deterministic pstack delegation through Herdr")
-    .requiredOption("--role <role>", "semantic pstack role")
+    .option("--role <role>", "semantic pstack role")
     .requiredOption("--name <name>", "unique Herdr agent name")
     .option("--prompt <text>", "worker prompt")
     .option("--prompt-file <path>", "read worker prompt from a file")
@@ -738,10 +823,11 @@ async function main(): Promise<void> {
     .option("--model <slug>", "override model passed to the worker CLI")
     .option("--effort <level>", "override reasoning effort passed to the worker CLI")
     .option("--wait", "wait for settled worker state and read output", false)
-    .option("--keep-pane", "keep a completed worker pane open after --wait", false)
+    .option("--keep-pane", "keep a completed worker pane open after --wait or --collect", false)
+    .option("--collect", "wait for, read, and close a worker that --wait left working", false)
     .option(
       "--timeout <ms>",
-      "timeout in milliseconds for agent start and --wait",
+      "timeout in milliseconds for agent start, --wait, and --collect",
       (value: string) => {
         if (!/^\d+$/.test(value)) throw new Error("--timeout must be a non-negative integer");
         return Number(value);
@@ -756,7 +842,15 @@ async function main(): Promise<void> {
     )
     .option("--routes <path>", "routes YAML/JSON path");
   program.parse(process.argv);
-  const options = program.opts<DispatchOptions>();
+  const options = program.opts<DispatchOptions & { collect: boolean }>();
+  const own = closeOnSignal();
+  if (options.collect) {
+    const result = await collect(options, process.env, spawnHerdr, own);
+    own(undefined);
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  if (!options.role) throw new Error("--role is required unless --collect is set");
   if (options.kind && options.kind !== "claude" && options.kind !== "codex") {
     throw new Error("--kind must be claude or codex");
   }
@@ -766,7 +860,8 @@ async function main(): Promise<void> {
   if (options.placement !== "tab" && options.placement !== "split") {
     throw new Error("--placement must be tab or split");
   }
-  const result = await dispatch(options);
+  const result = await dispatch(options, process.env, spawnHerdr, turnEvidence, own);
+  own(undefined);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 

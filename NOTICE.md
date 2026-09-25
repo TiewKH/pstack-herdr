@@ -1,6 +1,6 @@
 # NOTICE
 
-This repository is a fork of `michael-denyer/pstack-claude`, which ports upstream MIT-licensed pstack work to Claude Code and Codex. All upstream copyright notices and license terms are preserved.
+This repository is a fork of `michael-denyer/pstack-claude`, which ports upstream MIT-licensed pstack work to Claude Code and Codex. The fork's modifications and additions are also released under the [MIT license](LICENSE). All upstream copyright notices and license terms are preserved.
 
 ## Project lineage
 
