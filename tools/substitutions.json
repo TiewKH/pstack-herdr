@@ -36,9 +36,16 @@
       "rationale": "the host application"
     },
     {
-      "pattern": "(default `claude-fable-5-1-thinking-max`)",
+      "regex": "\\(default `(?:claude|gpt|grok|gemini|composer)-[^`]+`\\)",
+      "files": "^skills/poteto-mode/playbooks/",
       "replacement": "(default in poteto-mode's Models section)",
-      "rationale": "model defaults live in models.json and are stamped into Models sections, never hard-coded in prose"
+      "rationale": "model defaults live in models.json and are stamped into Models sections, never hard-coded in prose; playbooks belong to poteto-mode"
+    },
+    {
+      "regex": "\\(default `(?:claude|gpt|grok|gemini|composer)-[^`]+`\\)",
+      "files": "/SKILL\\.md$",
+      "replacement": "(default in [Models](#models))",
+      "rationale": "same rule for a skill body, which carries its own Models section"
     },
     {
       "pattern": ".cursor/skills/",
@@ -57,6 +64,18 @@
     }
   ],
   "denylist": [
+    {
+      "token": "grok-",
+      "hint": "Cursor model slug; point at the Models section, or add a substitution rule for the phrase"
+    },
+    {
+      "regex": "\\b(?:claude|gpt|gemini|composer)-[0-9a-z.-]*-(?:max|fast|xhigh|high|medium|low|thinking)\\b",
+      "hint": "Cursor model slug with an effort suffix; point at the Models section, or add a substitution rule for the phrase"
+    },
+    {
+      "token": "pstack-models.mdc",
+      "hint": "Cursor's rule file; the port's override sheet is ~/.claude/pstack-models.md"
+    },
     {
       "token": "`verify` skill (UIs)",
       "hint": "use the driver policy in poteto-mode/SKILL.md Non-negotiables"

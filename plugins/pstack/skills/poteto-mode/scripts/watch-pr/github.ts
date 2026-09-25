@@ -1,3 +1,4 @@
+import { parseLandingRevision, type LandingRevision } from "./landing.ts";
 import { spawn } from "node:child_process";
 import { DeadlineExceeded, type WatchDeadline } from "./deadline.ts";
 import type * as T from "./types.ts";
@@ -102,7 +103,7 @@ function parseJson(text: string, label: string): unknown {
     });
   }
 }
-async function runJson(
+export async function runJson(
   argv: readonly [string, ...string[]],
   deadline?: WatchDeadline,
 ): Promise<unknown> {
@@ -193,6 +194,7 @@ const ROLLUP_STATES = [
   "PENDING",
   "SUCCESS",
 ] as const;
+const OPEN_PR_LIMIT = 300;
 const REVIEW_DECISIONS = [
   "APPROVED",
   "CHANGES_REQUESTED",
@@ -278,6 +280,17 @@ function checkDetails(value: Record<string, unknown>, nameKey: string) {
     workflow: typeof value.workflow === "string" ? value.workflow : "",
   };
 }
+// gh buckets every state it does not name as pending, including completed
+// conclusions like STALE and STARTUP_FAILURE. Only these are in flight, the
+// same states mapRollupNode treats as pending.
+const IN_FLIGHT_STATES = new Set([
+  "EXPECTED",
+  "REQUESTED",
+  "WAITING",
+  "QUEUED",
+  "PENDING",
+  "IN_PROGRESS",
+]);
 export function parseFastCheck(value: unknown): T.Check {
   const object = record(value, "check");
   const details = checkDetails(object, "name");
@@ -288,7 +301,8 @@ export function parseFastCheck(value: unknown): T.Check {
     ["FAILURE", "ERROR", "ACTION_REQUIRED"].includes(state)
   )
     return { ...details, kind: "failed", reportedState: state };
-  if (bucket === "pending") return pendingOrGate(details, state);
+  if (bucket === "pending" && IN_FLIGHT_STATES.has(state))
+    return pendingOrGate(details, state);
   if (bucket === "pass")
     return { ...details, kind: "passed", reportedState: state };
   if (bucket === "skipping")
@@ -445,6 +459,13 @@ export function parseReviewThreads(value: unknown): readonly T.ReviewThread[] {
       bugbotReviewPasses: passes,
     }));
 }
+function readLandingRevision(value: unknown, context: T.PrContext): LandingRevision {
+  try {
+    return parseLandingRevision(value, context);
+  } catch (error) {
+    return missing("landing revision", error instanceof Error ? error.message : String(error));
+  }
+}
 export function parsePullRequest(
   value: unknown,
   context: T.PrContext,
@@ -452,6 +473,7 @@ export function parsePullRequest(
   const object = record(value, "pull request");
   if (typeof object.isDraft !== "boolean")
     missing("pull request.isDraft", object.isDraft);
+  if (object.state === "OPEN") readLandingRevision(object, context);
   return {
     context,
     mergeable: enumValue(
@@ -466,6 +488,7 @@ export function parsePullRequest(
     ),
     reviewDecision: reviewDecision(object.reviewDecision),
     headRefOid: optionalString(object.headRefOid, "pull request.headRefOid"),
+    baseRefOid: optionalString(object.baseRefOid, "pull request.baseRefOid"),
     headRefName: string(object.headRefName, "pull request.headRefName"),
     baseRefName: string(object.baseRefName, "pull request.baseRefName"),
     state: enumValue(
@@ -529,12 +552,14 @@ export class GhGitHubReader implements T.GitHubReader {
         "--repo",
         `${context.owner}/${context.repo}`,
         "--json",
-        "mergeable,mergeStateStatus,reviewDecision,headRefOid,headRefName,baseRefName,state,mergedAt,isDraft",
+        "mergeable,mergeStateStatus,reviewDecision,headRefOid,headRefName,baseRefName,baseRefOid,state,mergedAt,isDraft",
       ]),
       context,
     );
   }
-  async headCommit(context: T.PrContext): Promise<string | null> {
+  async revision(
+    context: T.PrContext,
+  ): Promise<LandingRevision> {
     const value = record(
       await this.runJson([
         "gh",
@@ -544,11 +569,11 @@ export class GhGitHubReader implements T.GitHubReader {
         "--repo",
         `${context.owner}/${context.repo}`,
         "--json",
-        "headRefOid",
+        "headRefOid,baseRefName,baseRefOid",
       ]),
       "pull request head",
     );
-    return optionalString(value.headRefOid, "pull request head.headRefOid");
+    return readLandingRevision(value, context);
   }
   async openPullRequests(
     repository: T.Repository,
@@ -562,7 +587,7 @@ export class GhGitHubReader implements T.GitHubReader {
       "--state",
       "open",
       "--limit",
-      "300",
+      String(OPEN_PR_LIMIT),
       "--json",
       "number,headRefName,baseRefName,headRepository,headRepositoryOwner",
     ]);
@@ -751,6 +776,20 @@ export async function resolveContext(args: {
       };
   }
   const inferred = await args.reader.currentPr(args.pr);
+  if (args.pr === null) {
+    // The checkout's PR number means nothing in another repository.
+    const found = `${inferred.owner}/${inferred.repo}`;
+    const requested = `${args.owner ?? inferred.owner}/${args.repo ?? inferred.repo}`;
+    if (requested.toLowerCase() !== found.toLowerCase()) {
+      const url = `https://github.com/${found}/pull/${inferred.number}`;
+      throw new WatcherQueryError({
+        kind: "invalid-context-url",
+        retryable: false,
+        rawValue: url,
+        detail: `the current branch's PR ${url} is not in ${requested}; pass --pr`,
+      });
+    }
+  }
   return {
     owner: args.owner ?? inferred.owner,
     repo: args.repo ?? inferred.repo,
@@ -834,5 +873,14 @@ export async function discoverStack(
   reader: T.GitHubReader,
   context: T.PrContext,
 ): Promise<T.NonEmpty<T.PrContext>> {
-  return orderStack(context, await reader.openPullRequests(context));
+  const open = await reader.openPullRequests(context);
+  // gh returns the newest PRs with no truncation signal, so a full page may
+  // have dropped an older PR from the bottom of the stack.
+  if (open.length >= OPEN_PR_LIMIT)
+    throw new WatcherQueryError({
+      kind: "invalid-stack",
+      retryable: true,
+      detail: `open PR list reached the ${OPEN_PR_LIMIT}-PR limit, so the stack may be incomplete`,
+    });
+  return orderStack(context, open);
 }

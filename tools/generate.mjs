@@ -9,7 +9,7 @@
 //   CHANGES.md must carry a heading for the current VERSION (release completeness)
 //   each skill's frontmatter (name + description) defines the shared Agent
 //   Skills boundary consumed natively by Codex, Prime, opencode, and Gemini CLI
-//   README.md's "Slash commands" table (one row per public skill, in editorial
+//   docs/reference.md's "Slash commands" table (one row per public skill, in editorial
 //   order; the row text is the Codex slash-menu one-liner)
 //     -> its Codex prompt stub in plugins/pstack/.codex-plugin/prompts/
 //   The row set must equal the public skills (every Agent Skill not marked
@@ -109,7 +109,7 @@ export function syncPortableAssets(repoRoot, skillsRoot, { log = console.log } =
     const expected = expectedByDir.get(targetDir);
     if (!expected) throw new Error(`${asset.target} has no declared generated output directory`);
     expected.add(basename(target));
-    if (existsSync(target) && lstatSync(target).isSymbolicLink()) {
+    if (lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()) {
       throw new Error(`${asset.target} is a symlink; refusing to overwrite it`);
     }
     return { label: asset.target, target, next: readFileSync(source, "utf8") };
@@ -256,25 +256,36 @@ export function validatePluginLayout(pluginRoot) {
 }
 
 // A public skill is any Agent Skill not marked user-invocable: false (the
-// principle-* leaves). Each has a row in the README slash-command table.
+// principle-* leaves). Each has a row in the reference slash-command table.
 export function publicSkills(skillsDir) {
   return agentSkills(skillsDir)
     .filter((skill) => skill.userInvocable)
     .map(({ name }) => name);
 }
 
-const README_TABLE_HEADER = "| command | use it when |";
+const COMMANDS_DOC = "docs/reference.md";
+const COMMAND_TABLE_HEADER = "| command | use it when |";
+// promptStub writes the menu text unquoted into YAML frontmatter, where ": " or
+// a trailing ":" starts a mapping, " #" starts a comment, and a leading
+// indicator character is a parse error or a different node.
+const UNSAFE_PLAIN_YAML = /:\s|:$|\s#|^(?:[,[\]{}#&*!|>'"%@`]|[-?:](?:\s|$))/;
 
-// The README table is the source of the Codex slash-menu one-liners and their
+// The reference table is the source of the Codex slash-menu one-liners and their
 // order. Returns [{ name, menu }] in row order; throws when the row set and the
 // public skills disagree, naming each side's leftovers.
-export function readmeCommands(readme, skillNames) {
-  const lines = readme.split("\n");
-  const range = tableRows(README_TABLE_HEADER, "|")(lines);
-  if (!range) throw new Error(`README.md: "${README_TABLE_HEADER}" table header not found`);
+export function slashCommands(markdown, skillNames) {
+  const lines = markdown.split("\n");
+  const range = tableRows(COMMAND_TABLE_HEADER, "|")(lines);
+  if (!range) throw new Error(`${COMMANDS_DOC}: "${COMMAND_TABLE_HEADER}" table header not found`);
   const rows = lines.slice(range[0], range[1]).map((line, i) => {
     const m = line.match(/^\| `\/([^`]+)` \| (.+) \|$/);
-    if (!m) throw new Error(`README.md: slash-command row ${i + 1} is not "| \`/name\` | text |": ${line}`);
+    if (!m) throw new Error(`${COMMANDS_DOC}: slash-command row ${i + 1} is not "| \`/name\` | text |": ${line}`);
+    if (UNSAFE_PLAIN_YAML.test(m[2])) {
+      throw new Error(
+        `${COMMANDS_DOC}: slash-command row ${i + 1} text is not a plain YAML value ` +
+          `(no ": ", " #", trailing ":", or leading indicator): ${line}`,
+      );
+    }
     return { name: m[1], menu: m[2] };
   });
   const rowNames = new Set(rows.map((r) => r.name));
@@ -283,12 +294,12 @@ export function readmeCommands(readme, skillNames) {
   const missingRows = [...skills].filter((n) => !rowNames.has(n));
   if (extraRows.length || missingRows.length) {
     throw new Error(
-      "README.md slash-command table is out of sync with the public skills" +
+      `${COMMANDS_DOC} slash-command table is out of sync with the public skills` +
         (extraRows.length ? `; row without a skill: ${extraRows.join(", ")}` : "") +
         (missingRows.length ? `; skill without a row: ${missingRows.join(", ")}` : ""),
     );
   }
-  if (rows.length !== rowNames.size) throw new Error("README.md slash-command table repeats a command");
+  if (rows.length !== rowNames.size) throw new Error(`${COMMANDS_DOC} slash-command table repeats a command`);
   return rows;
 }
 
@@ -297,7 +308,7 @@ export function readmeCommands(readme, skillNames) {
 export function promptStub({ name, menu }) {
   return (
     `---\nname: ${name}\ndescription: ${menu}\ndisable-model-invocation: true\n---\n\n` +
-    `Invoke the \`${name}\` skill and follow it. Resolve Claude tool names, \`claude-*\` model slugs, and ` +
+    `Invoke the \`${name}\` skill and follow it. Resolve Claude tool names, Claude model names, and ` +
     "Claude built-in skills through `poteto-mode/references/codex-tools.md`, including its Per-skill notes.\n"
   );
 }
@@ -319,9 +330,12 @@ export const section = (title) => (lines) => {
   return [start + 1, end];
 };
 
-// The inside of the first ```<lang> fence after a heading line.
-export const fenceUnder = (heading, lang) => (lines) => {
-  const step = lines.findIndex((l) => l.startsWith(heading));
+// The inside of the first ```<lang> fence after the `### N. <title>` step
+// heading. The ordinal is not part of the anchor, so inserting a step above it
+// does not move the region.
+export const fenceUnder = (title, lang) => (lines) => {
+  const heading = "### " + title;
+  const step = lines.findIndex((l) => l.replace(/^### \d+\. /, "### ") === heading);
   if (step === -1) return null;
   const open = lines.indexOf("```" + lang, step);
   if (open === -1) return null;
@@ -377,7 +391,7 @@ export function regions(models) {
     {
       file: skillFile("setup-pstack"),
       name: "override sheet",
-      locate: fenceUnder("### 5. Write the override sheet", "markdown"),
+      locate: fenceUnder("Write the override sheet", "markdown"),
       render: () => [overrideSheetBlock(models)],
     },
     {
@@ -405,12 +419,15 @@ export function applyRegions(file, text, models, { strict = true } = {}) {
   return lines.join("\n");
 }
 
-// A role's "models" is a list of slugs or the string "panel", which resolves to
-// the shared diverse-model panel so the panel is written once.
+// A role's "models" names a tier (default, strongest, panel) or lists slugs.
+// A tier resolves to its models and stays on the role as `tier`, so moving a
+// tier is one edit and the Codex mapping can follow the same keys.
 export function resolveModels(models) {
   return {
     ...models,
-    roles: models.roles.map((r) => (r.models === "panel" ? { ...r, models: models.panel } : r)),
+    roles: models.roles.map((r) =>
+      typeof r.models === "string" ? { ...r, tier: r.models, models: [models.tiers[r.models]].flat() } : r,
+    ),
   };
 }
 
@@ -453,12 +470,11 @@ export function modelsSection(roles) {
 }
 
 export function setupModelsSection(models) {
-  const avail = models.available.map((m) => `${m.label} (${code(m.slug)})`).join(", ");
   return (
     "Stamped from `plugins/pstack/models.json` (edit there, rerun `tools/generate.mjs`).\n\n" +
-    `- Available Claude models: ${avail}\n` +
-    `- Default panel: ${codeList(models.panel)}\n` +
-    `- Single-role default: ${code(models.singleRoleDefault)}`
+    `- Available Claude models: ${codeList(models.available)}\n` +
+    `- Default panel: ${codeList(models.tiers.panel)}\n` +
+    `- Single-role default: ${code(models.tiers.default)}`
   );
 }
 
@@ -471,35 +487,37 @@ export function overrideSheetBlock(models) {
     "Per-role model overrides for pstack skills. Each pstack SKILL.md names its defaults in a Models section; " +
     "the values here override those defaults. Delete a line to fall back to the skill default. " +
     "A value of `inherit-parent` or `auto` runs that role on the parent session's model (the `Agent` call omits `model`); " +
-    "an alias entry in a panel list still counts toward that panel's fan-out.\n\n" +
-    rows
+    "an alias entry in a panel list still counts toward that panel's fan-out. " +
+    "`session hook: off` stops the Claude Code or Codex SessionStart hook from injecting the poteto-mode mandate; " +
+    "any other value, or no line, leaves it on.\n\n" +
+    rows +
+    "\n\nsession hook: on"
   );
 }
 
 export function codexModelNamesSection(models) {
-  const strongest = models.roles.filter(
-    (r) => r.models.length === 1 && r.models[0] !== models.singleRoleDefault,
-  );
+  const strongest = models.roles.filter((r) => r.tier === "strongest");
   return (
     "Skills name Claude defaults (a single-role default for code/prose/judgment plus a diverse-model panel for " +
     "diverse-model panels; each model-consuming skill lists its own in a Models section). These slugs do not " +
     "resolve on Codex. Substitute your configured Codex models:\n\n" +
-    `- Single-model roles: your primary Codex model (for example ${code(models.codex.singleRoleExample)}).\n` +
+    `- Single-model roles: your primary Codex model (for example ${code(models.codex.default)}).\n` +
     `- Roles that default to the strongest Claude model (${strongest.map((r) => code(r.role)).join(", ")}): ` +
-    `your strongest Codex model (for example ${code(models.codex.strongestRoleExample)}).\n` +
+    `your strongest Codex model (for example ${code(models.codex.strongest)}).\n` +
     "- Diverse-model panels (`arena`, `architect`, `interrogate`, `how` critics, `reflect`): the adversarial " +
-    "signal comes from model diversity, so use the distinct Codex models available to you. A good default quad " +
-    `on ChatGPT is ${codeList(models.codex.panelQuad)}. If only one model family is reachable, vary reasoning ` +
+    "signal comes from model diversity, so use the distinct Codex models available to you. A good default panel " +
+    `on ChatGPT is ${codeList(models.codex.panel)}. If only one model family is reachable, vary reasoning ` +
     "effort and note in the verdict that diversity was reduced.\n\n" +
     "`/setup-pstack` writes the configured model list. On Codex, set it to your Codex model slugs."
   );
 }
 
-// After stamping, no claude-* model slug may survive in skill prose outside
-// the regions the generator owns in that file.
-const SLUG_RE = /claude-(?:opus|fable|sonnet|haiku)[0-9a-z.-]*/;
-
+// After stamping, skill prose outside the regions the generator owns may name
+// no model: a full claude-* ID is rejected by the Agent tool, and a backticked
+// family name hard-codes a default that belongs in models.json.
 export function strayModelSlugs(file, text, models) {
+  const families = models.available.join("|");
+  const SLUG_RE = new RegExp(`claude-(?:${families})[0-9a-z.-]*|\`(?:${families})\``);
   const lines = text.split("\n");
   const owned = regions(models)
     .filter((r) => r.file === file)
@@ -578,15 +596,14 @@ function main() {
   );
   if (strays.length) {
     throw new Error(
-      `claude-* model slugs outside generator-owned regions (move the fact into models.json or reference the role):\n` +
+      `model names outside generator-owned regions (reference the role and its Models section instead):\n` +
         strays.join("\n"),
     );
   }
   console.log("ok: no stray model slugs in skill prose");
 
-  const readmePath = join(repo, "README.md");
-  const skills = readmeCommands(readFileSync(readmePath, "utf8"), publicSkills(skillsDir));
-  console.log(`ok: README slash-command table names the ${skills.length} public skills`);
+  const skills = slashCommands(readFileSync(join(repo, COMMANDS_DOC), "utf8"), publicSkills(skillsDir));
+  console.log(`ok: ${COMMANDS_DOC} slash-command table names the ${skills.length} public skills`);
 
   const promptsDir = join(repo, "plugins/pstack/.codex-plugin/prompts");
   let promptsChanged = 0;

@@ -1,18 +1,20 @@
 # CHANGES — applied substitutions
 
-## 0.9.35 - close handed-off and interrupted Herdr workers
+## 0.9.44 - merge pstack-claude 0.9.43, close handed-off and interrupted Herdr workers
+
+This release merges `michael-denyer/pstack-claude` through 0.9.43 into the fork. That brings the upstream sync to `cursor/plugins` `12d587d`, model tiers named the way the `Agent` tool accepts them (`opus`, `fable`, `sonnet`), the Babysit, watch-pr, sync, and worktree-audit fixes, and the macOS fixture-path fix for `worktree-audit.test.mjs`. The fork and pstack-claude both released 0.9.30 to 0.9.34 with different contents, so those headings below name their line. The version jumps to 0.9.44 so installed copies on either line refresh.
 
 Two paths still left worker panes open after the work finished. A `--wait` budget that ran out returned `working`, and the documented follow-up (`herdr agent wait`, then `herdr agent read`) had no close step, so the pane outlived its worker. A dispatcher stopped mid-wait (`TaskStop` sends SIGTERM) exited before cleanup. Both reproduced against Herdr 0.9.1 with Codex reviewers.
 
 `herdr-dispatch.ts --collect --name <name>` now finishes a handed-off worker: it waits out the budget, reads the output, and closes a `done` or `idle` pane, sharing the settle step with `--wait`. `dispatch()` reports its pane as soon as the pane exists and `collect()` as soon as it finds it. The CLI closes that pane on SIGTERM, SIGINT, or SIGHUP before exiting with 128 plus the signal number, and releases it once the result is in hand, so a pane handed back on purpose stays open. SIGKILL still leaks the pane. The Herdr execution mapping, README, and HERDR.md point callers at `--collect` instead of raw Herdr commands.
 
-## 0.9.34 - close completed Herdr workers
+## 0.9.34 - pstack-herdr: close completed Herdr workers
 
 `herdr-dispatch.ts --wait` now closes a verified `done` or `idle` worker after reading its output. Settled results report `paneClosed`, and `--keep-pane` retains a completed worker for inspection. `working`, `blocked`, and `unknown` workers stay open. A completed-worker cleanup failure makes the dispatch fail instead of returning a result with a leaked pane.
 
 The unit suite covers every lifecycle state, the opt-out, and cleanup failure. The real Herdr end-to-end test now proves that the completed worker no longer exists. The README and Herdr execution mapping describe the same lifecycle.
 
-## 0.9.33 - sync pstack through 5bf2b154
+## 0.9.33 - pstack-herdr: sync pstack through 5bf2b154
 
 The pstack upstream pin moves from `e8d856f` to `5bf2b1544db739998121a306340631963c2ff3de`, the latest commit touching `cursor/plugins/pstack` at sync time. This carries the September prose-density cleanup, evidence-or-label reply rule, operator-neutral wording and in-chat status tick, and the code-role default update. The upstream setup reasoning-budget prompt is intentionally not adopted because this fork already configures model and effort independently per Herdr worker profile.
 
@@ -20,11 +22,11 @@ The sync tool applied the non-overlapping skill edits directly and three-way mer
 
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
-## 0.9.32 - a done verdict needs transcript proof
+## 0.9.32 - pstack-herdr: a done verdict needs transcript proof
 
 Herdr once read a pane whose CLI booted but never ran its prompt as done: the machine slept mid-dispatch, a worker showed a static banner, and the dispatcher returned done with an empty composer as output. After `agent wait`, a done or idle status now needs proof that the prompt ran: a Codex rollout under `$CODEX_HOME/sessions`, or a Claude session file under `$CLAUDE_CONFIG_DIR/projects`, written after the prompt was sent and holding its first line. Without that proof the dispatcher captures the screen, closes the pane, and throws, the same shape as a failed delivery.
 
-## 0.9.31 - the Agent gate, the default config home, and prompt delivery
+## 0.9.31 - pstack-herdr: the Agent gate, the default config home, and prompt delivery
 
 A `PreToolUse` hook on `Agent` (`plugins/pstack/hooks/herdr-agent-gate.sh`) now enforces the Herdr mapping that was prose only. With `HERDR_ENV=1` and `herdr`, `bun`, and the dispatcher present, it denies a native subagent call and returns the `herdr-dispatch.ts` command and the mapping path. When any of those is missing it allows the call and names the missing piece. Outside Herdr it is silent, and restarting Claude Code with `PSTACK_HERDR_ALLOW_NATIVE_AGENT=1` bypasses it.
 
@@ -34,11 +36,100 @@ Prompt delivery is now checked rather than assumed. A prompt typed into a Codex 
 
 A `--wait` budget that runs out after delivery used to close the pane under a healthy worker; it now leaves the pane open and returns the live status, usually `working`, with the visible screen as output. `agent start` gets at most the 300000 ms Herdr accepts, so a larger `default_timeout_ms` no longer fails every dispatch. Herdr errors carry their parsed `code` on a `HerdrError`, and `planDispatch` separates routing, environment, and timeout decisions from the Herdr calls so they can be tested without a scripted `herdr`.
 
-## 0.9.30 - Herdr becomes the native delegation runtime, and Fable 5.1 becomes the default
+## 0.9.30 - pstack-herdr: Herdr becomes the native delegation runtime, and Fable 5.1 becomes the default
 
 Inside Herdr (`HERDR_ENV=1`), `herdr-dispatch.ts` now handles Claude/Codex worker delegation: it routes each semantic role across authenticated CLI profiles, carries recursive delegation depth (default max 3), and keeps pstack's worktree isolation, synthesis, review, and verification behavior. Every skill that dispatches subagents now routes through it, replacing the old SessionStart-forced behavior with a per-workflow opt-in. `/setup-pstack` drives the same routing file (`~/.config/pstack-herdr/routes.yaml`) through a shared parser instead of hand-authored YAML, and each profile can now set a reasoning-effort override that maps to the worker CLI's own flag. Native (non-Herdr) delegation is unchanged.
 
 `plugins/pstack/models.json`'s diverse-model panel and four single-model roles (`bug-fix`, `perf-issue`, `hillclimb`, `strongest judgment`) now default to Fable 5.1 (`claude-fable-5-1`) instead of Fable 5, which stays available for manual choice through `/setup-pstack`. Codex example slugs are unchanged.
+
+## 0.9.43 - pstack-claude: watch-pr stops at the review gate
+
+`watch-pr` reported READY with exit 0 for a PR that GitHub would not merge. Its readiness proof checked conflicts, review threads, CI, draft state, and `CHANGES_REQUESTED`, but not `REVIEW_REQUIRED`. `assessGitHubMerge` also accepts `mergeStateStatus: BLOCKED` when the head rollup is not failing, so a PR held only by a required approval passed every check. The Review column printed ✅ because it looked only at threads and review automation.
+
+Such a PR now ends in the terminal `merge-gate` blocker with exit 6, the path `CHANGES_REQUESTED` already takes. The reason is `review-required` when `reviewDecision` is `REVIEW_REQUIRED`, and `merge-blocked` when `mergeStateStatus` is `BLOCKED` for another branch protection rule, such as signed commits or a required check that never reported. Both reasons wait while checks are still pending, as `draft-pr` does. This applies in single, `--stack`, and `--queued-stack` mode. The watcher hands off at the gate instead of waiting on it, because the shipping playbook routes human approval gates to a wait of its own. `ReadyPr`'s `reviewDecision` type excludes `REVIEW_REQUIRED`. The status table shows 👀 review required and ⛔ blocked.
+
+This is a port-local edit to upstream's vendored `watch-pr`. It belongs upstream as well, and the next sync that touches `policy.ts` must keep it.
+
+**Verified.** `bun test orch watch-pr` gives 118 pass, 0 fail, including four `review gate` cases in `policy.test.ts`. `bun run typecheck` is clean. For a PR with `REVIEW_REQUIRED` and `BLOCKED`, the 0.9.42 policy classifies it as ready and this build reports the `review-required` blocker.
+
+## 0.9.42 - pstack-claude: watcher check states and script edge cases
+
+`watch-pr` fails a check whose state is a completed conclusion that gh puts in its pending bucket, such as `STARTUP_FAILURE` or `STALE`. Before, the watcher waited on such a check until its timeout, and forever under the default `--timeout 0`. When `--pr` is omitted, it refuses to pair the checkout's PR number with a different `--owner` or `--repo`. It also refuses stack discovery when `gh pr list` returns a full page of 300 open PRs, because a full page may have cut the bottom of the stack.
+
+`worktree-audit.sh` searches transcripts with `rg --no-config -uu`, so an ignore file or a user rg config can no longer hide a live chat. A missing transcripts directory prints a warning and moves a worktree from `safe` to `review`. `check-plan.mjs` treats a fence indented inside a list item as a fence. `find-transcript.mjs` runs under node when it is invoked through a symlinked path. `log.sh` prefixes a cell that starts with `"`, which a quote-aware TSV reader would otherwise unwrap. This release forks `find-transcript.mjs` and `log.sh` from upstream.
+
+`tools/sync.mjs` gives a written file the upstream file's mode, detects binaries by content, and reports an upstream symlink as a conflict without following it. It rethrows git errors instead of counting them as conflict hunks. `tools/upstream.json` excludes the eleven `cursor-team-kit` skills the port does not carry.
+
+## 0.9.41 - pstack-claude: model tiers and shape-based sync rules
+
+`plugins/pstack/models.json` names three tiers, `default`, `strongest`, and `panel`, and each role names the tier it runs on. The Codex mapping reads the same keys from the `codex` block, so it no longer infers the strongest roles from which single-model roles differ from the default. Under that inference, moving a role to `haiku` listed it as a strongest-model role. `available` is a plain list of the family names the `Agent` tool accepts. Stamped output is unchanged.
+
+The generator's stray-model scan builds its pattern from `available`. It still rejects a full `claude-*` ID and now also rejects a backticked family name such as `` `fable` `` outside a stamped region, which the old `claude-*` pattern let through. `poteto-mode`, `setup-pstack`, and `codex-tools.md` point at the Models sections instead of listing the names.
+
+`tools/substitutions.json` rules can match a `regex` and be limited to paths matching `files`. Two rules rewrite any vendor's ``(default `<slug>`)``, pointing playbooks at poteto-mode's Models section and a skill body at its own. The denylist catches any Cursor slug with an effort suffix, such as `gpt-6-sol-max`, in place of the `gpt-5.6-` prefix. A dry run at `12d587d` reports 64 forked and 59 unchanged files, the same as 0.9.40, with no denylist hits.
+
+`check-plan.mjs` accepts one lanes phrasing again, the one the port's plan skeleton writes.
+
+The `setup-pstack` step that rewrites full model IDs in an old override sheet comes out in 0.10.0.
+
+## 0.9.40 - pstack-claude: name models the way the Agent tool accepts them
+
+The Claude Code `Agent` tool takes `opus`, `fable`, `sonnet`, or `haiku` as `model` and rejects full IDs such as `claude-opus-5-5`, checked against the tool schema on Claude Code 2.1.281. Every default in `models.json` was a full ID, so each subagent's first dispatch failed and the skills recovered through their rejection fallback. `models.json` now names the four family names, and the generator restamped the `## Models` sections, the interrogate reviewer table, and setup-pstack's override sheet and available-model line. `tests/models.test.mjs` fails if `available` names anything the tool does not accept.
+
+A family name runs that family's current model, so a role can no longer pick between Opus versions. `/setup-pstack` rewrites full IDs in an existing sheet to their family names and lists the rewrites. Until it is rerun, an old sheet still costs one rejected dispatch per subagent before the fallback.
+
+## 0.9.39 - pstack-claude: sync to upstream 12d587d (v0.15.5)
+
+The upstream pin moves from `e8d856f` to `12d587d`, upstream v0.15.5. The range carries upstream's punctuation pass (semicolons, long dashes, and connector colons become periods or commas), operator-neutral pronouns, cuts of instructions that current models no longer need, code-ready rounds and multiple audit lanes in the autopilot and multi-phase playbooks, a patch-id noise rule in shipping, and role-line reads for the panel skills with an alias and rejection fallback. `how` and `why` name the override-sheet role line each spawn reads. Measured with `bun tools/sync.mjs pstack 12d587d`: 37 files written clean, 13 merged three-way, 22 unchanged, 35 excluded, 23 forked with upstream untouched, and 28 conflicted files resolved by hand.
+
+Port policy is unchanged where it diverges from upstream. The autopilots stop at merge-ready for the operator's click, `shipping` keeps the watcher-owned blocker classification, and `feature` keeps the per-delegate worktree. Model defaults stay in `models.json`, so upstream's move to Opus 5.5 and Grok 4.7 does not change any role. The reasoning-budget step upstream added to `setup-pstack` is not ported, because Claude Code model slugs carry no effort token.
+
+`tools/substitutions.json` rewrites ``(default `grok-4.7-xhigh-fast`)`` to the Models-section pointer, as it already did for the Fable default. Without it the clean sync wrote the Grok slug into `hillclimb.md` and `perf-issue.md`. The denylist now rejects `grok-`, `gpt-5.6-`, and `pstack-models.mdc`, so a Cursor model slug or rule path that no substitution covers fails the sync.
+
+## 0.9.38 - pstack-claude: use GPT-6 models for Codex
+
+Codex model examples use GPT-6 Sol for single-model roles and GPT-6 Astra, Sol, and Luna for panels. The Codex panel configuration is named `panel` instead of `panelQuad` because it now has three models. Claude model defaults are unchanged.
+
+## 0.9.37 - pstack-claude: move the Opus roles to Opus 5.5
+
+`plugins/pstack/models.json` names `claude-opus-5-5` where it named `claude-opus-5`: the single-role default, the panel, and every single-model role that ran Opus 5 (`feature, refactoring`, `judgment and prose`, `how explorer`, `how explainer`, `why investigators`, `why synthesizer`, `reflect tooling`, `reflect judgment, divergent, synthesizer`, `swarm workers`). The generator restamped the `## Models` sections, the interrogate reviewer table, and setup-pstack's override sheet and available-model line. Opus 5.5 joins the available-model list as `Opus 5.5`; Opus 5 stays there for `/setup-pstack` overrides. The Fable roles are unchanged. The pin remains at `e8d856f`.
+
+## 0.9.36 - pstack-claude: Babysit confirms the first status read
+
+This is a deliberate local fork. Preserve it during upstream sync.
+
+The Babysit playbook took a PR number or a status from the request and never said to check that the first status read was about that PR or stack. Step 2 makes the merge frontier the only PR that matters, but no step said to name it before acting. Step 6 now says to confirm that the PR or stack the first status read reports matches the request, and to name the current merge frontier. The sentence adds no command. On GitHub the watcher already answers both: `--stack` follows the connected open stack from one `--pr`, and its verdict carries `frontier`. A request may name a stack by any PR in it, so the requested PR does not have to be the frontier. Step 1 stays identical to upstream.
+
+## 0.9.35 - pstack-claude: route Codex sessions through pstack
+
+The bundled `SessionStart` hook now runs on both Claude Code and Codex. A runtime-aware executable reads `session hook` from `~/.claude/pstack-models.md` or `~/.codex/pstack-models.md`, while the Codex manifest explicitly declares the shared hook and includes resume events. The setup skill, Codex mapping, README, and reference explain Codex's `/hooks` trust step and the difference between native-plugin and skills-only installs. Tests execute the shipped command under both runtime environments and cover missing, on, and off settings. The README now leads with installation, a first task, and a workflow diagram; the slash-command table, runtime notes, dependencies, and maintenance documentation move to `docs/reference.md`, which the generator reads for the Codex prompt stubs. The upstream pin remains at `e8d856f`.
+
+## 0.9.34 - pstack-claude: improve agent workflow reliability
+
+These workflow changes are deliberate local forks. Preserve them during upstream sync.
+
+- Testing guidance evaluates the defects a test detects. Required absence, explicit default-value contracts, useful comparisons, and shared setup remain valid. Weak assertions need stronger expectations when correctness requires a particular result.
+- Debugging guidance challenges the assumption shared by failed fixes. Per-actor measurements apply when the hypothesis concerns uneven allocation; an even distribution does not rule out a shared defect.
+- Shipping binds immediate merges to the verified head and requires durable verification gates for future merges. The watcher and `ship-pr` share a landing revision containing the repository, PR, head, base branch, and base commit. `ship-pr` owns pending-merge inspection, cancellation, and readback; changed or unreadable state refuses a rewrite. Explicit remote leases protect concurrent changes, and child rebases exclude a squashed parent's old commits. Local state-transition and Git tests cover these contracts; a disposable GitHub verifier exercises the service boundary.
+- Decision records distinguish attributable human instructions from agent interpretations. Missing originals leave exact scope uncertain, and copied summaries remain one evidence chain. Component ownership narrows irrelevant investigations without blocking relevant cross-component work.
+- Pause checkpoints use one locator under the Git common directory across runtimes and worktrees. `resume.mjs` validates notes and artifacts before atomically publishing the latest pointer; pickup reads it from project identity alone and checks content hashes and links. Continuing work does not trigger a pause.
+- Architecture guidance reconciles accepted deviations with the saved design before the next implementation unit. Local changes can leave the shared contract intact; unaccepted behavior cannot rewrite the agreement.
+
+## 0.9.33 - pstack-claude: worktree-audit resolves the trunk from the remote
+
+`worktree-audit.sh` read the trunk as a literal `main` in both its fetch and its `git merge-base --is-ancestor` check. On a repo that trunks anywhere else the fetch failed, the run warned once, and every worktree came back `MERGED=?`, which never reaches the `safe` bucket, so a merged worktree read as unresolved and the prune audit stopped pruning. The script now asks the remote with `git ls-remote --symref origin HEAD`, which is plumbing and needs no locale pin or placeholder matching, and uses `main` only when the remote publishes no usable HEAD. An explicit fetch refspec updates the trunk's remote-tracking ref even in a single-branch clone. Regression tests use local Git remotes to cover non-main trunks, missing cached HEADs, single-branch clones, and unknown remote HEADs. The pin remains at `e8d856f`.
+
+## 0.9.32 - pstack-claude: setup-pstack toggles the session hook and names the sheet per runtime
+
+`setup-pstack` asks whether the SessionStart hook should route tasks, default on, and records the answer as a `session hook: on` or `off` line in `~/.claude/pstack-models.md`; the generator emits that line in the sheet block. `hooks.json` greps for `session hook: off` before injecting the mandate, so the choice survives plugin updates, replacing the README advice to delete `hooks.json`. `tests/session-hook.test.mjs` runs the shipped command under a temp HOME for no sheet, on, and off. The skill gains an Other runtimes table naming the sheet path, load mechanism, and model listing for Codex, opencode, Gemini CLI, and Prime Agent; the opencode and Gemini rows come from published docs with no live session recorded, and the table is the one place that names the sheet path per runtime. The generator locates the sheet block by the step's title rather than its number, so inserting a step no longer moves the anchor. The pin remains at `e8d856f`.
+
+## 0.9.31 - pstack-claude: tighten the SessionStart mandate gate
+
+`hooks/session-start-context.md` names three criteria for entering `poteto-mode`: more than one file or a signature other files call, a design or architecture choice, a bug with an unknown cause or a performance issue. Below the bar the agent works directly and verifies on the real artifact. Before, anything beyond a one-line edit routed in, and the skill has no small-task path, so a contained one-file change paid for `how`, `architect`, and a delegate. The direct-entry list now carries skill names only, and the subagent clause is gone: SessionStart does not fire for Agent-tool subagents, which start from their own system prompt, the task, CLAUDE.md, git status, and preloaded skills. The hook is 147 words, down from 176. The README describes the bar. The pin remains at `e8d856f`.
+
+## 0.9.30 - pstack-claude: move the Fable roles to Fable 5.1
+
+`plugins/pstack/models.json` names `claude-fable-5-1` where it named `claude-fable-5`: the panel, the available-model list (label `Fable 5.1`), and the four single-model roles `bug-fix`, `perf-issue`, `hillclimb`, and `strongest judgment`. The generator restamped the `## Models` sections of `poteto-mode`, `arena`, `architect`, and `interrogate`, the interrogate reviewer table, and setup-pstack's override sheet and available-model line. The README panel row states the new default. Fable 5 leaves the available-model list. The pin remains at `e8d856f`.
 
 ## 0.9.29 - the verify driver and the todolist resolve on Claude Code
 
