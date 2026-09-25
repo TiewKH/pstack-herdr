@@ -204,4 +204,4 @@ Cursor-specific automations, sticky-mode metadata, the Grok Bot UI workflow, and
 
 For skill changes, follow the [sync boundary](../CONTRIBUTING.md#the-sync-boundary). Workflow changes usually belong upstream; runtime adaptations belong here.
 
-See the [license summary](../README.md#license) for licenses and full-plugin attribution. [NOTICE-skills.md](../NOTICE-skills.md) is the notice for skills-only installations.
+See the [attribution summary](../README.md#attribution) for licenses and full-plugin attribution. [NOTICE-skills.md](../NOTICE-skills.md) is the notice for skills-only installations.
