@@ -28,7 +28,7 @@ Find each skill's instructions in the [skills tree](../plugins/pstack/skills/).
 | `/show-me-your-work` | log decisions to a reviewable tsv decision trail |
 | `/blast-radius` | find what a change could break beyond the diff and prove safety by running code |
 | `/recall` | catch up on recent working context from chat history, live state, and the shared record |
-| `/setup-pstack` | configure pstack per-role model choices |
+| `/setup-pstack` | configure per-role models, or Herdr routes inside Herdr |
 | `/unslop` | clean up writing by removing AI tells |
 | `/no-comments` | strip comments before review, fix the accepted findings, encode claimed constraints |
 | `/create-verification-skill` | generate a project-local verification skill and feature map |
@@ -54,6 +54,8 @@ All runtimes share [one skills tree](../plugins/pstack/skills/). A skills-only i
 | opencode | Discovery and reading a linked skill were verified on version 1.18.25. Configure agents, commands, and permissions in `opencode.json`. Its picker also lists principle skills. |
 | Gemini CLI | Its documentation describes shared-directory discovery; it has not been tested in a live session. Use `/skills list` to check discovery and `/skills reload` after changes. |
 
+Inside Herdr, Claude Code and Codex coordinators delegate through the Herdr dispatcher instead; see [HERDR.md](../HERDR.md).
+
 These checks cover skill discovery. Delegation and multi-model workflows remain unverified on Prime Agent, opencode, and Gemini CLI. On those runtimes, agents must adapt Claude-specific tools, models, and configuration. The Codex mapping applies only to Codex.
 
 ### Automatic routing
@@ -75,8 +77,8 @@ Skills-only installs and other runtimes do not include the hook. Request `poteto
 Use this path for Prime Agent, opencode, Gemini CLI, or a skills-only Codex installation. Clone the repository and link its skills into `~/.agents/skills/`:
 
 ```shell
-git clone https://github.com/michael-denyer/pstack-claude
-cd pstack-claude
+git clone https://github.com/TiewKH/pstack-herdr
+cd pstack-herdr
 mkdir -p ~/.agents/skills
 for s in plugins/pstack/skills/*/; do
   target=~/.agents/skills/"$(basename "$s")"
@@ -97,7 +99,7 @@ To update, pull changes in the clone that the links point to. To uninstall a lin
 To install without keeping a local clone:
 
 ```shell
-npx skills add https://github.com/michael-denyer/pstack-claude/tree/main/plugins/pstack/skills --skill "*" --agent "*" --yes
+npx skills add https://github.com/TiewKH/pstack-herdr/tree/main/plugins/pstack/skills --skill "*" --agent "*" --yes
 ```
 
 The [CI installation check](../.github/workflows/ci.yml) uses the skills CLI to copy the checkout's skill tree and compare the installed files with their sources.
@@ -106,7 +108,7 @@ The [CI installation check](../.github/workflows/ci.yml) uses the skills CLI to 
 
 The [native plugin manifest](../plugins/pstack/.codex-plugin/plugin.json) points to the shared skills directory and [SessionStart hook](../plugins/pstack/hooks/hooks.json). The [marketplace catalog](../.agents/plugins/marketplace.json) lists `pstack` in the `pstack-claude` marketplace. Review and trust the hook through `/hooks`; Codex asks again when its definition changes.
 
-The [README installation](../README.md#codex) registers that catalog with `codex plugin marketplace add`, then installs the plugin with `codex plugin add`. These commands match the help output from `codex-cli 0.154.0-alpha.6.2`. A fresh native installation was not tested for this documentation change.
+The [README installation](../README.md#codex) registers that catalog with `codex plugin marketplace add`, then installs the plugin with `codex plugin add`. These commands match the help output from `codex-cli 0.156.1`.
 
 OpenAI documents [marketplace registration and the plugin format](https://developers.openai.com/plugins/build/plugins#add-a-marketplace-from-the-cli). If your CLI lacks `plugin add`, use the plugin browser after registering the marketplace, or use the [skills-only installation](#shared-skills-installation).
 
@@ -133,7 +135,7 @@ Each shortcut invokes its skill. The commands skip existing files and links. Rem
 
 ## Configuration and dependencies
 
-Invoke [setup-pstack](../plugins/pstack/skills/setup-pstack/SKILL.md) to choose models for each role. It detects available models, confirms the choices, and writes an override sheet. Its [runtime table](../plugins/pstack/skills/setup-pstack/SKILL.md#other-runtimes) names the sheet path and loading mechanism for each runtime. Defaults live in [models.json](../plugins/pstack/models.json).
+Invoke [setup-pstack](../plugins/pstack/skills/setup-pstack/SKILL.md) to choose models for each role. It detects available models, confirms the choices, and writes an override sheet. Inside Herdr it writes `~/.config/pstack-herdr/routes.yaml` instead; see [HERDR.md](../HERDR.md#routing). Its [runtime table](../plugins/pstack/skills/setup-pstack/SKILL.md#other-runtimes) names the sheet path and loading mechanism for each runtime. Defaults live in [models.json](../plugins/pstack/models.json).
 
 For design comparisons and reviews, choose distinct models available to your runtime. The default panel uses different Claude models.
 
@@ -142,7 +144,8 @@ Install dependencies for the workflows you use:
 | Dependency | When you need it |
 | --- | --- |
 | GitHub CLI, `gh` | PR monitoring and shipping. Authenticate with `gh auth login`. |
-| Bun | The bundled `watch-pr` and `orch` scripts. Their bootstrap installs script dependencies on first run. |
+| Bun | The bundled `watch-pr`, `orch`, and `herdr-dispatch.ts` scripts. Their bootstrap installs script dependencies on first run. |
+| Herdr | Visible delegated workers. See [HERDR.md](../HERDR.md). |
 | Graphite CLI, `gt` | The Orchestrate playbook and `orch` stack frontier. Shipping and autopilot playbooks use `gh` or Origin's CLI when available. |
 | `jq` and `rg` | PR and transcript columns in `worktree-audit.sh`. Missing tools produce warnings and blank columns. |
 | `plugin-dev` | Claude Code skill-authoring guidance used by `automate-me`, `reflect`, and `poteto-mode`. |
@@ -166,13 +169,15 @@ Use [create-verification-skill](../plugins/pstack/skills/create-verification-ski
 
 ```text
 .claude-plugin/marketplace.json    Claude Code marketplace
+config/                           Herdr routes and setup examples
+HERDR.md                          Herdr runtime contract
 .agents/plugins/marketplace.json  Codex marketplace
 plugins/pstack/
   .claude-plugin/plugin.json      Claude Code plugin manifest
   .codex-plugin/                  Codex manifest and generated prompt stubs
   skills/                        Shared skills, references, and scripts
   agents/                        Claude Code subagent definitions
-  hooks/                         Claude Code startup routing
+  hooks/                         startup routing and the Herdr Agent gate
 tools/                           Generation, validation, and upstream sync
 tests/                           Repository checks
 ```
@@ -198,7 +203,7 @@ CI also checks shell scripts, workflows, Markdown, relative links, and the bundl
 
 The skill tree is synced against upstream `12d587d` (v0.15.5).
 
-This repository ports Lauren Tan's pstack from Cursor to Claude Code and shares the skills with other runtimes. It includes seven cursor-team-kit skills and an independently authored `babysit` skill. The port supplies Claude Code plugin registration and routing, Codex manifests and shortcuts, and the Codex tool mapping.
+pstack-claude ports Lauren Tan's pstack from Cursor to Claude Code and shares the skills with other runtimes. This fork adds the Herdr dispatcher, its routing config, and the Agent gate. It includes seven cursor-team-kit skills and an independently authored `babysit` skill. The port supplies Claude Code plugin registration and routing, Codex manifests and shortcuts, and the Codex tool mapping.
 
 Cursor-specific automations, sticky-mode metadata, the Grok Bot UI workflow, and the Cursor UI tutorial are excluded. [tools/upstream.json](../tools/upstream.json) records the revisions and exclusions; [CHANGES.md](../CHANGES.md) records the per-skill port changes. The bundled `thermo-nuclear-code-quality-review` provides a maintainability review when a workflow calls for one.
 

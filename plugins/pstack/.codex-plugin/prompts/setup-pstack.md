@@ -1,6 +1,6 @@
 ---
 name: setup-pstack
-description: configure pstack per-role model choices
+description: configure per-role models, or Herdr routes inside Herdr
 disable-model-invocation: true
 ---
 

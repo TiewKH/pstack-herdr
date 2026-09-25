@@ -103,4 +103,4 @@ So: any PR that changes skill behavior either bumps the version itself or is fol
 
 ## Reporting bugs
 
-Include the pstack version, the Claude Code (or Codex) version, and the reproduction steps. [#22](https://github.com/michael-denyer/pstack-claude/issues/22) is the model to copy: it named versions, gave numbered steps, and included the experiment that isolated the cause.
+Include the pstack version, the Claude Code (or Codex) version, the Herdr version for a dispatch bug, and the reproduction steps. [#22](https://github.com/michael-denyer/pstack-claude/issues/22) is the model to copy: it named versions, gave numbered steps, and included the experiment that isolated the cause.
