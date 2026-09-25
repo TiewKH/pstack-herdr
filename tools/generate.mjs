@@ -474,8 +474,14 @@ export function setupModelsSection(models) {
     "Stamped from `plugins/pstack/models.json` (edit there, rerun `tools/generate.mjs`).\n\n" +
     `- Available Claude models: ${codeList(models.available)}\n` +
     `- Default panel: ${codeList(models.tiers.panel)}\n` +
-    `- Single-role default: ${code(models.tiers.default)}`
+    `- Single-role default: ${code(models.tiers.default)}\n` +
+    `- Herdr Claude worker IDs: ${labelledList(models.herdr.claude)}\n` +
+    `- Herdr Codex worker IDs: ${labelledList(models.herdr.codex)}`
   );
+}
+
+function labelledList(pairs) {
+  return pairs.map(([label, id]) => `${label} (${code(id)})`).join(", ");
 }
 
 // The override sheet the setup skill writes for users. The preamble is fixed;

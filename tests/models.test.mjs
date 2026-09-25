@@ -56,8 +56,26 @@ describe("models.json shape", () => {
 
   test("the file stays one row per entry so a role change is a one-line diff", () => {
     const text = readFileSync(join(repoRoot, "plugins/pstack/models.json"), "utf8");
-    expect(text.split("\n").length).toBeLessThan(raw.roles.length * 2);
+    expect(text.split("\n").length).toBeLessThan(raw.roles.length * 2 + 4);
+    expect(text.match(/^\s*"(claude|codex)": \[\[.*\]\],?$/gm)).toHaveLength(2);
     expect(text.match(/^\s*\{ "/gm)).toHaveLength(raw.roles.length);
+  });
+
+  test("Herdr worker IDs are labelled full CLI model IDs, so a route can pin a version", () => {
+    for (const kind of ["claude", "codex"]) {
+      const pairs = raw.herdr[kind];
+      expect(pairs.length).toBeGreaterThan(0);
+      for (const pair of pairs) expect(pair).toHaveLength(2);
+      expect(new Set(pairs.map(([, id]) => id)).size).toBe(pairs.length);
+    }
+    for (const [, id] of raw.herdr.claude) expect(id).toMatch(/^claude-(opus|fable|sonnet|haiku)-\d/);
+    for (const [, id] of raw.herdr.codex) expect(id).toMatch(/^gpt-\d/);
+  });
+
+  test("setup-pstack lists the Herdr worker IDs by label and ID", () => {
+    const text = readFileSync(join(skillsDir, "setup-pstack/SKILL.md"), "utf8");
+    expect(text).toContain("- Herdr Claude worker IDs: Opus 5.5 (`claude-opus-5-5`), ");
+    expect(text).toContain("- Herdr Codex worker IDs: GPT-6-Sol (`gpt-6-sol`), ");
   });
 
   test("the codex examples cover every tier and the panel names distinct models", () => {
