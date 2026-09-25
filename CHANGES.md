@@ -4,7 +4,7 @@
 
 Two paths still left worker panes open after the work finished. A `--wait` budget that ran out returned `working`, and the documented follow-up (`herdr agent wait`, then `herdr agent read`) had no close step, so the pane outlived its worker. A dispatcher stopped mid-wait (`TaskStop` sends SIGTERM) exited before cleanup. Both reproduced against Herdr 0.9.1 with Codex reviewers.
 
-`herdr-dispatch.ts --collect --name <name>` now finishes a handed-off worker: it waits out the budget, reads the output, and closes a `done` or `idle` pane, sharing the settle step with `--wait`. `dispatch()` reports its pane as soon as the pane exists, and the CLI closes that pane on SIGTERM, SIGINT, or SIGHUP before exiting with 128 plus the signal number. SIGKILL still leaks the pane. The Herdr execution mapping, README, and HERDR.md point callers at `--collect` instead of raw Herdr commands.
+`herdr-dispatch.ts --collect --name <name>` now finishes a handed-off worker: it waits out the budget, reads the output, and closes a `done` or `idle` pane, sharing the settle step with `--wait`. `dispatch()` reports its pane as soon as the pane exists and `collect()` as soon as it finds it. The CLI closes that pane on SIGTERM, SIGINT, or SIGHUP before exiting with 128 plus the signal number, and releases it once the result is in hand, so a pane handed back on purpose stays open. SIGKILL still leaks the pane. The Herdr execution mapping, README, and HERDR.md point callers at `--collect` instead of raw Herdr commands.
 
 ## 0.9.34 - close completed Herdr workers
 

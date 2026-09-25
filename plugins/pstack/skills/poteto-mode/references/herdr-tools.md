@@ -76,7 +76,7 @@ With `--wait`, the dispatcher returns JSON containing the Herdr agent name, pane
 bun <poteto-mode>/scripts/herdr-dispatch.ts --collect --name <agent-name> --timeout <ms>
 ```
 
-It returns the same settled JSON without `profile` and `depth`, and leaves the pane open again if the worker is still running when the budget ends. Close a pane with `herdr pane close <pane>` only when the work is no longer wanted. A dispatcher stopped by SIGTERM, SIGINT, or SIGHUP closes the pane it opened before it exits; SIGKILL cannot be caught and still leaks the pane.
+It returns the same settled JSON without `profile` and `depth`, and leaves the pane open again if the worker is still running when the budget ends. Close a pane with `herdr pane close <pane>` only when the work is no longer wanted. A dispatcher stopped by SIGTERM, SIGINT, or SIGHUP while it waits on a worker, in a dispatch or a `--collect`, closes that worker's pane before it exits; SIGKILL cannot be caught and still leaks the pane.
 
 `--timeout` and `orchestration.default_timeout_ms` are one budget applied to `agent start` readiness (at most the 300000 ms Herdr accepts) and to the `agent wait` that follows a prompt. Before typing, the dispatcher waits for the worker to report idle, then counts the prompt delivered once the agent leaves idle (`working`, `blocked`, or `done`) within `PSTACK_HERDR_DELIVERY_WINDOW_MS` (default 8000), retrying the prompt once. A prompt that never lands is an error that carries the screen, never a `done` over an empty composer.
 

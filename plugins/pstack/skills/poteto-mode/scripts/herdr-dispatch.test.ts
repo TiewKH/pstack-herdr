@@ -763,6 +763,21 @@ describe("herdr-dispatch collect", () => {
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
   });
 
+  test("reports the pane before waiting, so an interrupted collect can close it", async () => {
+    const order: string[] = [];
+    const { exec } = scriptedExec({
+      "agent get": codexGet("done"),
+      "agent wait": () => {
+        order.push("agent wait");
+        return waitOk;
+      },
+      "agent read": readOk,
+      "pane close": closeOk,
+    });
+    await collect(collectOptions, herdrEnv, exec, (pane) => order.push(`pane ${pane}`));
+    expect(order).toEqual(["pane w1:p7", "agent wait"]);
+  });
+
   test("collect refuses to run outside Herdr", async () => {
     const { calls, exec } = scriptedExec({});
     await expect(collect(collectOptions, {}, exec)).rejects.toThrow(/HERDR_ENV=1/);

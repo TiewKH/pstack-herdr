@@ -778,11 +778,13 @@ export async function dispatch(
 export async function collect(
   options: CollectOptions,
   env: NodeJS.ProcessEnv = process.env,
-  exec: HerdrExec = spawnHerdr
+  exec: HerdrExec = spawnHerdr,
+  onPane: (pane: string) => void = () => {}
 ): Promise<CollectResult> {
   if (env.HERDR_ENV !== "1") throw new Error("herdr-dispatch requires HERDR_ENV=1");
   const timeout = defaultTimeout(loadRoutes(options.routes, env), options.timeout);
   const { pane, kind } = agentLocation(await runHerdrJson(["agent", "get", options.name], exec));
+  onPane(pane);
   const status = agentStatus(await awaitSettled(options.name, timeout, exec));
   return {
     agent: options.name,
@@ -792,8 +794,8 @@ export async function collect(
   };
 }
 
-// An interrupted dispatch closes the pane it opened; nobody is left to read that worker.
-function closeOnSignal(): (pane: string) => void {
+// An interrupted dispatch or collect closes its worker's pane; nobody is left to read it.
+function closeOnSignal(): (pane: string | undefined) => void {
   let owned: string | undefined;
   for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
     process.on(signal, () => {
@@ -841,8 +843,10 @@ async function main(): Promise<void> {
     .option("--routes <path>", "routes YAML/JSON path");
   program.parse(process.argv);
   const options = program.opts<DispatchOptions & { collect: boolean }>();
+  const own = closeOnSignal();
   if (options.collect) {
-    const result = await collect(options);
+    const result = await collect(options, process.env, spawnHerdr, own);
+    own(undefined);
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
@@ -856,7 +860,8 @@ async function main(): Promise<void> {
   if (options.placement !== "tab" && options.placement !== "split") {
     throw new Error("--placement must be tab or split");
   }
-  const result = await dispatch(options, process.env, spawnHerdr, turnEvidence, closeOnSignal());
+  const result = await dispatch(options, process.env, spawnHerdr, turnEvidence, own);
+  own(undefined);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
