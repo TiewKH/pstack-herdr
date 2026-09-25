@@ -230,7 +230,7 @@ bun <poteto-mode>/scripts/herdr-dispatch.ts \
 
 With `--wait`, the dispatcher reads the output and closes a verified `done` or `idle` worker. The result sets `paneClosed` to `true`. Pass `--keep-pane` to retain a completed worker for inspection. A cleanup failure makes the dispatch fail.
 
-For parallel fan-out, launch all dispatcher processes before waiting. A Herdr state of `blocked` is not completion; inspect the worker for an approval or question. `unknown` likewise must not be treated as successful completion. `working`, `blocked`, and `unknown` panes stay open. Poll them with `herdr agent wait <name>`.
+For parallel fan-out, launch all dispatcher processes before waiting. A Herdr state of `blocked` is not completion; inspect the worker for an approval or question. `unknown` likewise must not be treated as successful completion. `working`, `blocked`, and `unknown` panes stay open. Finish a `working` one with `herdr-dispatch.ts --collect --name <name>`: it waits, reads the output, and closes the pane once the worker is done. A dispatcher stopped by SIGTERM, SIGINT, or SIGHUP closes its pane before it exits.
 
 ### The Agent gate
 

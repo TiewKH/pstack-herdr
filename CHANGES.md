@@ -1,5 +1,11 @@
 # CHANGES — applied substitutions
 
+## 0.9.35 - close handed-off and interrupted Herdr workers
+
+Two paths still left worker panes open after the work finished. A `--wait` budget that ran out returned `working`, and the documented follow-up (`herdr agent wait`, then `herdr agent read`) had no close step, so the pane outlived its worker. A dispatcher stopped mid-wait (`TaskStop` sends SIGTERM) exited before cleanup. Both reproduced against Herdr 0.9.1 with Codex reviewers.
+
+`herdr-dispatch.ts --collect --name <name>` now finishes a handed-off worker: it waits out the budget, reads the output, and closes a `done` or `idle` pane, sharing the settle step with `--wait`. `dispatch()` reports its pane as soon as the pane exists, and the CLI closes that pane on SIGTERM, SIGINT, or SIGHUP before exiting with 128 plus the signal number. SIGKILL still leaks the pane. The Herdr execution mapping, README, and HERDR.md point callers at `--collect` instead of raw Herdr commands.
+
 ## 0.9.34 - close completed Herdr workers
 
 `herdr-dispatch.ts --wait` now closes a verified `done` or `idle` worker after reading its output. Settled results report `paneClosed`, and `--keep-pane` retains a completed worker for inspection. `working`, `blocked`, and `unknown` workers stay open. A completed-worker cleanup failure makes the dispatch fail instead of returning a result with a leaked pane.
