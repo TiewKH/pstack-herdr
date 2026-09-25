@@ -19,6 +19,7 @@ jobs:
   osv-scan:
     name: OSV vulnerability scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       # persist-credentials: false on every checkout — nothing here needs git
       # auth after the clone, and a stored token can leak via artifacts.
@@ -37,6 +38,9 @@ jobs:
       #
       # The v2.5.1 tag is mutable, so the digest is what actually pins this.
       # Resolved with: docker buildx imagetools inspect ghcr.io/google/osv-scanner:v2.5.1
+      #
+      # The scanner needs outbound access for advisory data, but the repository
+      # is mounted read-only and the workflow token has contents:read only.
       - name: Scan lockfiles
         shell: bash
         run: |
@@ -52,6 +56,7 @@ jobs:
   zizmor:
     name: Workflow static analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
