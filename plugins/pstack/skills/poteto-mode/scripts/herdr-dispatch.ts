@@ -9,6 +9,7 @@ import {
   expandHome,
   isDefaultConfigHome,
   loadRoutes,
+  modelKind,
   type AgentKind,
   type Profile,
   type RoutesConfig,
@@ -196,11 +197,19 @@ export function stableIndex(seed: string, size: number): number {
 export function selectProfileName(
   config: RoutesConfig,
   role: string,
-  workerName: string
+  workerName: string,
+  kind?: AgentKind
 ): string | undefined {
   const route = config.roles?.[role];
-  const pool = route?.profiles ?? [];
-  if (pool.length === 0) return undefined;
+  const all = route?.profiles ?? [];
+  if (all.length === 0) return undefined;
+  const pool = kind
+    ? all.filter((name) => config.profiles?.[name]?.kind === kind)
+    : all;
+  if (pool.length === 0)
+    throw new Error(
+      `role ${role} has no ${kind} profile (pool: ${all.join(", ")})`
+    );
   const strategy = route?.strategy ?? "first";
   switch (strategy) {
     case "spread":
@@ -561,9 +570,18 @@ function chooseProfile(
     const profile = config.profiles?.[options.profile];
     if (!profile)
       throw new Error(`unknown Herdr route profile: ${options.profile}`);
+    if (options.kind && options.kind !== profile.kind)
+      throw new Error(
+        `--profile ${options.profile} runs ${profile.kind}, not --kind ${options.kind}`
+      );
     return { name: options.profile, profile };
   }
-  const routedName = selectProfileName(config, options.role, options.name);
+  const routedName = selectProfileName(
+    config,
+    options.role,
+    options.name,
+    options.kind
+  );
   if (routedName) {
     const profile = config.profiles?.[routedName];
     if (!profile)
@@ -636,6 +654,12 @@ export function planDispatch(
   const nesting = depth(config, env);
   const timeout = defaultTimeout(config, options.timeout);
   const kind = chosen.profile.kind;
+  const model = options.model ?? chosen.profile.model;
+  const owner = model ? modelKind(model) : undefined;
+  if (owner && owner !== kind)
+    throw new Error(
+      `model ${model} is a ${owner} model, but profile ${chosen.name} runs ${kind}`
+    );
   const childEnv = {
     ...workerEnv(kind, chosen.profile.env, homedir(), env),
     PSTACK_HERDR_DEPTH: String(nesting.next),
@@ -656,7 +680,7 @@ export function planDispatch(
     placeArgs: placementArgs(options, resolve(options.cwd), envFlags(childEnv)),
     startTail: agentStartTail(
       kind,
-      options.model ?? chosen.profile.model,
+      model,
       options.effort ?? chosen.profile.effort,
       options.readonly
     ),
@@ -962,7 +986,10 @@ async function main(): Promise<void> {
     .option("--prompt-file <path>", "read worker prompt from a file")
     .option("--cwd <path>", "worker cwd/worktree", process.cwd())
     .option("--profile <name>", "force a configured route profile")
-    .option("--kind <kind>", "fallback agent kind, claude or codex")
+    .option(
+      "--kind <kind>",
+      "claude or codex: narrows the role's pool, or picks the CLI when no route matches"
+    )
     .option("--model <slug>", "override model passed to the worker CLI")
     .option(
       "--effort <level>",
