@@ -22,7 +22,7 @@ codex plugin marketplace add TiewKH/pstack-herdr
 codex plugin add pstack@pstack-claude
 ```
 
-Codex asks you to trust the routing hook through `/hooks` before it runs. For skills-only installs and other runtimes, see [shared installation](docs/reference.md#shared-skills-installation).
+Run `setup-pstack` to change model defaults, set a reasoning effort per role (for example `arena runners: opus @xhigh, fable @max`, which Claude Code dispatches through the plugin's `pstack:effort-<level>` or `pstack:poteto-agent-<level>` agents; roles without a level keep the session's effort unless the sheet's `default effort` line names one), or turn automatic routing off. The plugin installs the routing hook on Claude Code and Codex; Codex asks you to trust it through `/hooks` before it runs. In Claude Code, use `/pstack:setup-pstack`. For skills-only installs and other runtimes, see [shared installation](docs/reference.md#shared-skills-installation).
 
 ## Use it with Herdr
 
@@ -55,6 +55,10 @@ Skills keep Claude's Agent vocabulary. [`herdr-tools.md`](plugins/pstack/skills/
 - [Models and dependencies](docs/reference.md#configuration-and-dependencies)
 - [Maintenance and port scope](docs/reference.md#maintenance)
 - [Contributing](CONTRIBUTING.md) and [security reports](SECURITY.md)
+
+## Data handling
+
+pstack has no server or telemetry. Anything its skills ask your agent to read, including session transcripts, goes to your model provider. Scripts run locally, and PR tools use your GitHub CLI login. Herdr workers run as local Claude Code or Codex processes under the profiles you configure.
 
 ## Attribution
 

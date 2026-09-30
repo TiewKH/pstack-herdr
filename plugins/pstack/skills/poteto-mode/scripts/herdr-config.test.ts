@@ -13,7 +13,8 @@ import {
 
 const dirs: string[] = [];
 afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs.splice(0))
+    rmSync(dir, { recursive: true, force: true });
 });
 
 const setup: {
@@ -43,10 +44,19 @@ const setup: {
   roles: {
     explorer: { profiles: ["claude-fast"], strategy: "first" },
     implementation: { profiles: ["claude-fast"], strategy: "first" },
-    "difficult-implementation": { profiles: ["claude-strong"], strategy: "first" },
+    "difficult-implementation": {
+      profiles: ["claude-strong"],
+      strategy: "first",
+    },
     judgment: { profiles: ["claude-strong"], strategy: "first" },
-    reviewer: { profiles: ["claude-strong", "claude-fast"], strategy: "spread" },
-    "arena-candidate": { profiles: ["claude-strong", "claude-fast"], strategy: "spread" },
+    reviewer: {
+      profiles: ["claude-strong", "claude-fast"],
+      strategy: "spread",
+    },
+    "arena-candidate": {
+      profiles: ["claude-strong", "claude-fast"],
+      strategy: "spread",
+    },
     "arena-judge": { profiles: ["claude-strong"], strategy: "first" },
     verifier: { profiles: ["claude-fast"], strategy: "first" },
     subcoordinator: { profiles: ["claude-strong"], strategy: "first" },
@@ -71,8 +81,14 @@ describe("herdr deterministic setup", () => {
         },
       },
     };
-    const result = buildRoutes(existing, parseSetupInput(JSON.stringify(setup)));
-    expect(result.orchestration).toEqual({ max_depth: 7, default_timeout_ms: 90000 });
+    const result = buildRoutes(
+      existing,
+      parseSetupInput(JSON.stringify(setup))
+    );
+    expect(result.orchestration).toEqual({
+      max_depth: 7,
+      default_timeout_ms: 90000,
+    });
     expect(result.profiles?.["claude-strong"].env).toEqual({
       CLAUDE_CONFIG_DIR: "~/.claude-team",
       EXTRA_FLAG: "1",
@@ -101,36 +117,55 @@ describe("herdr deterministic setup", () => {
     badCodex.profiles[0] = {
       ...badCodex.profiles[0],
       kind: "codex",
-      effort: "max",
+      effort: "minimal",
     };
     expect(() => parseSetupInput(JSON.stringify(badCodex))).toThrow(
-      "effort must be one of minimal, low, medium, high, xhigh for codex"
+      "effort must be one of low, medium, high, xhigh, max, ultra for codex"
     );
+  });
+
+  test("codex profiles accept the max and ultra levels Codex now offers", () => {
+    for (const effort of ["max", "ultra"]) {
+      const input = structuredClone(setup);
+      input.profiles[0] = { ...input.profiles[0], kind: "codex", effort };
+      const config = buildRoutes({}, parseSetupInput(JSON.stringify(input)));
+      expect(config.profiles?.["claude-strong"].effort).toBe(effort);
+    }
   });
 
   test("two profiles may share one subscription config home", () => {
     const result = buildRoutes({}, parseSetupInput(JSON.stringify(setup)));
-    expect(result.profiles?.["claude-strong"].env?.CLAUDE_CONFIG_DIR).toBe("~/.claude-team");
-    expect(result.profiles?.["claude-fast"].env?.CLAUDE_CONFIG_DIR).toBe("~/.claude-team");
+    expect(result.profiles?.["claude-strong"].env?.CLAUDE_CONFIG_DIR).toBe(
+      "~/.claude-team"
+    );
+    expect(result.profiles?.["claude-fast"].env?.CLAUDE_CONFIG_DIR).toBe(
+      "~/.claude-team"
+    );
   });
 
   test("a default config home is recorded as given; the dispatcher decides at run time", () => {
     const defaults = structuredClone(setup);
     defaults.profiles[0].config_home = "~/.claude";
     const result = buildRoutes({}, parseSetupInput(JSON.stringify(defaults)));
-    expect(result.profiles?.["claude-strong"].env).toEqual({ CLAUDE_CONFIG_DIR: "~/.claude" });
+    expect(result.profiles?.["claude-strong"].env).toEqual({
+      CLAUDE_CONFIG_DIR: "~/.claude",
+    });
   });
 
   test("missing required roles fail closed", () => {
     const broken = structuredClone(setup);
     delete (broken.roles as Record<string, unknown>).verifier;
-    expect(() => parseSetupInput(JSON.stringify(broken))).toThrow(/missing required role: verifier/);
+    expect(() => parseSetupInput(JSON.stringify(broken))).toThrow(
+      /missing required role: verifier/
+    );
   });
 
   test("unknown profile references fail closed", () => {
     const broken = structuredClone(setup);
     broken.roles.explorer.profiles = ["missing"];
-    expect(() => parseSetupInput(JSON.stringify(broken))).toThrow(/unknown profile missing/);
+    expect(() => parseSetupInput(JSON.stringify(broken))).toThrow(
+      /unknown profile missing/
+    );
   });
 
   test("atomic writer is idempotent", () => {
@@ -165,15 +200,29 @@ describe("herdr deterministic setup", () => {
     const inputPath = join(dir, "setup.json");
     const outputPath = join(dir, "routes.yaml");
     writeFileSync(inputPath, JSON.stringify(setup));
-    const yaml = renderRoutesYaml(buildRoutes({}, parseSetupInput(JSON.stringify(setup))));
+    const yaml = renderRoutesYaml(
+      buildRoutes({}, parseSetupInput(JSON.stringify(setup)))
+    );
     writeFileSync(outputPath, yaml);
 
-    const current = await runConfigure(["--input", inputPath, "--output", outputPath, "--check"]);
+    const current = await runConfigure([
+      "--input",
+      inputPath,
+      "--output",
+      outputPath,
+      "--check",
+    ]);
     expect(current.exitCode).toBe(0);
     expect(current.stdout).toContain("routes are valid and current");
 
     writeFileSync(outputPath, yaml.replaceAll(/    model: .*\n/g, ""));
-    const stale = await runConfigure(["--input", inputPath, "--output", outputPath, "--check"]);
+    const stale = await runConfigure([
+      "--input",
+      inputPath,
+      "--output",
+      outputPath,
+      "--check",
+    ]);
     expect(stale.exitCode).not.toBe(0);
     expect(stale.stderr).toMatch(/does not match the requested setup input/);
 
@@ -191,11 +240,14 @@ describe("herdr deterministic setup", () => {
 async function runConfigure(
   args: string[]
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(["bun", join(import.meta.dir, "configure-herdr.ts"), ...args], {
-    cwd: import.meta.dir,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const proc = Bun.spawn(
+    ["bun", join(import.meta.dir, "configure-herdr.ts"), ...args],
+    {
+      cwd: import.meta.dir,
+      stdout: "pipe",
+      stderr: "pipe",
+    }
+  );
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
