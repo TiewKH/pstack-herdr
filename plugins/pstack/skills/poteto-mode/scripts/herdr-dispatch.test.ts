@@ -936,6 +936,10 @@ const codexGet = (status: string): CommandResult =>
       },
     },
   });
+const claudeGet = (status: string): CommandResult => {
+  const codex = codexGet(status);
+  return { ...codex, stdout: codex.stdout.replace('"codex"', '"claude"') };
+};
 const collectOptions = {
   name: "ci-review",
   keepPane: false,
@@ -947,7 +951,7 @@ describe("herdr-dispatch collect", () => {
   test("a handed-off worker that finishes is read, then its pane is closed", async () => {
     let gets = 0;
     const { calls, exec } = scriptedExec({
-      "agent get": () => codexGet(gets++ === 0 ? "working" : "done"),
+      "agent get": () => claudeGet(gets++ === 0 ? "working" : "done"),
       "agent wait": waitOk,
       "agent read": readOk,
       "pane close": closeOk,
@@ -956,7 +960,7 @@ describe("herdr-dispatch collect", () => {
     expect(result).toEqual({
       agent: "ci-review",
       pane: "w1:p7",
-      kind: "codex",
+      kind: "claude",
       status: "done",
       blocked: false,
       paneClosed: true,
@@ -974,7 +978,7 @@ describe("herdr-dispatch collect", () => {
 
   test("a worker still running when the budget ends stays open", async () => {
     const { calls, exec } = scriptedExec({
-      "agent get": codexGet("working"),
+      "agent get": claudeGet("working"),
       "agent wait": failed(
         '{"error":{"code":"timeout","message":"timed out"},"id":"cli:agent:wait"}'
       ),
@@ -991,7 +995,7 @@ describe("herdr-dispatch collect", () => {
 
   test("--keep-pane keeps a collected worker open", async () => {
     const { calls, exec } = scriptedExec({
-      "agent get": codexGet("done"),
+      "agent get": claudeGet("done"),
       "agent wait": waitOk,
       "agent read": readOk,
     });
@@ -1007,7 +1011,7 @@ describe("herdr-dispatch collect", () => {
   test("reports the pane before waiting, so an interrupted collect can close it", async () => {
     const order: string[] = [];
     const { exec } = scriptedExec({
-      "agent get": codexGet("done"),
+      "agent get": claudeGet("done"),
       "agent wait": () => {
         order.push("agent wait");
         return waitOk;
@@ -1312,7 +1316,12 @@ describe("herdr-dispatch codex turns", () => {
       const { calls, exec } = scriptedExec({
         ...happyPath(),
         "agent prompt": () => {
-          box.rollout("w", startedLine, askedLine("ping"), completeLine("PONG"));
+          box.rollout(
+            "w",
+            startedLine,
+            askedLine("ping"),
+            completeLine("PONG")
+          );
           return promptOk;
         },
         "agent get": getAfterPrompt("working", "unknown"),
@@ -1439,7 +1448,9 @@ describe("herdr-dispatch codex turns", () => {
   test("collect refuses a codex worker it has no dispatch record for and leaves it open", async () => {
     const box = codexSandbox();
     try {
-      const { calls, exec } = scriptedExec({ "agent get": codexGet("unknown") });
+      const { calls, exec } = scriptedExec({
+        "agent get": codexGet("unknown"),
+      });
       await expect(collect(collectOptions, box.env, exec)).rejects.toThrow(
         /no dispatch record for ci-review/
       );
