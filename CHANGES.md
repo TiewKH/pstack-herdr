@@ -2,6 +2,16 @@
 
 This file is the release changelog, with one `## <version> - <title>` entry per release, newest first. The Cursor-to-Claude rewrite rules live in [`tools/substitutions.json`](tools/substitutions.json), and the [sync boundary](CONTRIBUTING.md#the-sync-boundary) in `CONTRIBUTING.md` defines which changes belong upstream.
 
+## 0.9.57 - pstack-herdr: end a Codex turn at its rollout's task_complete
+
+Herdr 0.9.2 (herdrdev/herdr#4563) stopped reading a quiet Codex screen as `idle`. A ready Codex composer and a finished Codex turn now both read `unknown`, and the Codex integration reports only the session ID. On Herdr 0.9.3, a one-word Codex dispatch waited the whole budget for `idle` before typing, waited the whole budget again for the turn, then failed on `agent read` with `agent_not_idle` and left its pane open: 128 s at `--timeout 60000` for a turn Codex finished in 2.5 s. Herdr 0.9.1 has the opposite defect (herdrdev/herdr#4507): it can read a running Codex turn as `idle`, the prompt-quote check passes, and the dispatcher closes a working pane.
+
+The dispatcher now appends a marker line, `[pstack-herdr turn <name>-<time>]`, to every Codex prompt. A Codex turn ends when the rollout that quotes the marker records `task_complete` after it. The dispatcher returns `done` with the turn's `last_agent_message` as the output. While the rollout shows the turn open, it reports `working`, even when Herdr says `idle`. The prompt counts as delivered once the rollout quotes the marker, and the wait before typing also accepts `unknown` for Codex. The marker keeps two workers whose prompts share a first line from ending each other's turn. The rollout is read under the worker's own `CODEX_HOME`, so a profile with a second account works.
+
+Before it types the prompt, a dispatch saves the pane, sessions directory, marker, and start time to `$TMPDIR/pstack-herdr/<name>.json`. `--collect` reads that record to check the same turn. A Codex worker without one fails `--collect` and stays open. A failed save closes the pane. Claude workers keep the Herdr status path.
+
+The same dispatch on Herdr 0.9.3 now returns `done` with output `PONG` in 26 s and closes its pane.
+
 ## 0.9.56 - pstack-herdr: Sonnet 5.5 in the Herdr Claude menu
 
 The Herdr Claude menu now lists Sonnet 5.5 (`claude-sonnet-5-5`) ahead of Sonnet 5. 0.9.54 called the Claude list current, but Claude Code 2.1.285's catalog also carries Sonnet 5.5, and it answered `OK` through `claude -p --model claude-sonnet-5-5` on 30 Sep 2026. The newest ID in each family is now Opus 5.5, Fable 5.1, Sonnet 5.5, and Haiku 4.5. `config/setup.example.json` moves its fast profile to `claude-sonnet-5-5`. Setup step 1 tells the agent to try the next version up from each Claude family's newest menu ID, and names the error an unknown ID returns.

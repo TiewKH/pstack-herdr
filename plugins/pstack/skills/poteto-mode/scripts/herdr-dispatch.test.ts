@@ -12,6 +12,7 @@ import { loadRoutes, parseRoutes, type RoutesConfig } from "./herdr-config.ts";
 import {
   agentStatus,
   applyReadonlyPrompt,
+  codexTurn,
   collect,
   dispatch,
   effortAgentArgs,
@@ -935,6 +936,10 @@ const codexGet = (status: string): CommandResult =>
       },
     },
   });
+const claudeGet = (status: string): CommandResult => {
+  const codex = codexGet(status);
+  return { ...codex, stdout: codex.stdout.replace('"codex"', '"claude"') };
+};
 const collectOptions = {
   name: "ci-review",
   keepPane: false,
@@ -946,7 +951,7 @@ describe("herdr-dispatch collect", () => {
   test("a handed-off worker that finishes is read, then its pane is closed", async () => {
     let gets = 0;
     const { calls, exec } = scriptedExec({
-      "agent get": () => codexGet(gets++ === 0 ? "working" : "done"),
+      "agent get": () => claudeGet(gets++ === 0 ? "working" : "done"),
       "agent wait": waitOk,
       "agent read": readOk,
       "pane close": closeOk,
@@ -955,7 +960,7 @@ describe("herdr-dispatch collect", () => {
     expect(result).toEqual({
       agent: "ci-review",
       pane: "w1:p7",
-      kind: "codex",
+      kind: "claude",
       status: "done",
       blocked: false,
       paneClosed: true,
@@ -973,7 +978,7 @@ describe("herdr-dispatch collect", () => {
 
   test("a worker still running when the budget ends stays open", async () => {
     const { calls, exec } = scriptedExec({
-      "agent get": codexGet("working"),
+      "agent get": claudeGet("working"),
       "agent wait": failed(
         '{"error":{"code":"timeout","message":"timed out"},"id":"cli:agent:wait"}'
       ),
@@ -990,7 +995,7 @@ describe("herdr-dispatch collect", () => {
 
   test("--keep-pane keeps a collected worker open", async () => {
     const { calls, exec } = scriptedExec({
-      "agent get": codexGet("done"),
+      "agent get": claudeGet("done"),
       "agent wait": waitOk,
       "agent read": readOk,
     });
@@ -1006,7 +1011,7 @@ describe("herdr-dispatch collect", () => {
   test("reports the pane before waiting, so an interrupted collect can close it", async () => {
     const order: string[] = [];
     const { exec } = scriptedExec({
-      "agent get": codexGet("done"),
+      "agent get": claudeGet("done"),
       "agent wait": () => {
         order.push("agent wait");
         return waitOk;
@@ -1232,6 +1237,335 @@ describe("herdr-dispatch turn evidence", () => {
       expect(turnEvidence(query)).toBe(true);
     } finally {
       rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+const rolloutLine = (payload: Record<string, unknown>, type = "event_msg") =>
+  JSON.stringify({ timestamp: new Date().toISOString(), type, payload });
+const askedLine = (text: string) =>
+  rolloutLine(
+    {
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text }],
+    },
+    "response_item"
+  );
+const startedLine = rolloutLine({ type: "task_started" });
+const completeLine = (message: string) =>
+  rolloutLine({ type: "task_complete", last_agent_message: message });
+
+function codexSandbox() {
+  const root = mkdtempSync(join(tmpdir(), "pstack-herdr-codex-"));
+  const sessions = join(root, "codex", "sessions");
+  const day = join(sessions, "2026", "09", "30");
+  mkdirSync(day, { recursive: true });
+  const env = {
+    HERDR_ENV: "1",
+    CODEX_HOME: join(root, "codex"),
+    TMPDIR: join(root, "tmp"),
+  };
+  const rollout = (name: string, ...lines: string[]) =>
+    writeFileSync(join(day, `rollout-${name}.jsonl`), `${lines.join("\n")}\n`);
+  return { root, sessions, env, rollout };
+}
+
+// The prompt a Codex worker was typed, which its rollout quotes in full.
+function promptedWith(onPrompt: (prompt: string) => void) {
+  return (args: string[]) => {
+    onPrompt(args[3]);
+    return promptOk;
+  };
+}
+
+describe("herdr-dispatch codex turns", () => {
+  test("a codex turn is complete only once task_complete follows its own marker", () => {
+    const box = codexSandbox();
+    try {
+      const query = {
+        root: box.sessions,
+        needle: "[pstack-herdr turn b-1]",
+        since: Date.now() - 1000,
+      };
+      expect(codexTurn(query)).toEqual({ state: "absent" });
+      box.rollout(
+        "b",
+        startedLine,
+        askedLine("ping\n\n[pstack-herdr turn b-1]")
+      );
+      expect(codexTurn(query)).toEqual({ state: "running" });
+      box.rollout(
+        "a",
+        startedLine,
+        askedLine("ping\n\n[pstack-herdr turn a-1]"),
+        completeLine("A's answer")
+      );
+      expect(codexTurn(query)).toEqual({ state: "running" });
+      box.rollout(
+        "b",
+        completeLine("earlier turn"),
+        startedLine,
+        askedLine("ping\n\n[pstack-herdr turn b-1]")
+      );
+      expect(codexTurn(query)).toEqual({ state: "running" });
+      box.rollout(
+        "b",
+        startedLine,
+        askedLine("ping\n\n[pstack-herdr turn b-1]"),
+        completeLine("PONG")
+      );
+      expect(codexTurn(query)).toEqual({ state: "complete", message: "PONG" });
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
+  test("a codex worker is prompted without waiting for an idle Herdr never reports", async () => {
+    const box = codexSandbox();
+    try {
+      const { calls, exec } = scriptedExec({
+        ...happyPath(),
+        "agent get": getStatus("working"),
+      });
+      await dispatch({ ...options, kind: "codex" }, box.env, exec);
+      const settle = calls.find((args) => commandKey(args) === "agent wait");
+      expect(settle).toContain("unknown");
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
+  test("a codex prompt its rollout records is delivered even while Herdr reads unknown", async () => {
+    const box = codexSandbox();
+    try {
+      const { calls, exec } = scriptedExec({
+        ...happyPath(),
+        "agent prompt": promptedWith((prompt) =>
+          box.rollout("w", startedLine, askedLine(prompt), completeLine("OK"))
+        ),
+        "agent get": getStatus("unknown"),
+        "pane close": closeOk,
+      });
+      const result = await dispatch(
+        { ...options, kind: "codex", wait: true },
+        box.env,
+        exec
+      );
+      expect(result).toMatchObject({ status: "done", output: "OK" });
+      expect(
+        calls.filter((args) => commandKey(args) === "agent prompt")
+      ).toHaveLength(1);
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
+  test("a finished codex turn that Herdr reads as unknown is done, with the final message as output", async () => {
+    const box = codexSandbox();
+    try {
+      const { calls, exec } = scriptedExec({
+        ...happyPath(),
+        "agent prompt": promptedWith((prompt) =>
+          box.rollout("w", startedLine, askedLine(prompt), completeLine("PONG"))
+        ),
+        "agent get": getAfterPrompt("working", "unknown"),
+        "pane close": closeOk,
+      });
+      const result = await dispatch(
+        { ...options, kind: "codex", wait: true },
+        box.env,
+        exec
+      );
+      expect(result).toMatchObject({
+        kind: "codex",
+        status: "done",
+        blocked: false,
+        paneClosed: true,
+        output: "PONG",
+      });
+      expect(calls.some((args) => commandKey(args) === "agent read")).toBe(
+        false
+      );
+      expect(calls.at(-1)).toEqual(["pane", "close", "w1:p2"]);
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
+  test("a codex turn Herdr reads as idle while its rollout is still open stays working", async () => {
+    const box = codexSandbox();
+    try {
+      const { calls, exec } = scriptedExec({
+        ...happyPath(),
+        "agent prompt": promptedWith((prompt) =>
+          box.rollout("w", startedLine, askedLine(prompt))
+        ),
+        "agent get": getAfterPrompt("working", "idle"),
+        "agent read": textResult("Working (3s)\n"),
+      });
+      const result = await dispatch(
+        { ...options, kind: "codex", wait: true, timeout: 0 },
+        box.env,
+        exec
+      );
+      expect(result).toMatchObject({
+        status: "working",
+        paneClosed: false,
+        output: "Working (3s)",
+      });
+      expect(calls.some((args) => commandKey(args) === "pane close")).toBe(
+        false
+      );
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
+  test("a codex worker Herdr calls done with no rollout of the prompt never ran it", async () => {
+    const box = codexSandbox();
+    try {
+      const { calls, exec } = scriptedExec({
+        ...happyPath(),
+        "agent get": getAfterPrompt("working", "done"),
+        "agent read": textResult("OpenAI Codex\n"),
+        "pane close": closeOk,
+      });
+      await expect(
+        dispatch(
+          { ...options, kind: "codex", wait: true, timeout: 0 },
+          box.env,
+          exec
+        )
+      ).rejects.toThrow(/no codex transcript[\s\S]*never ran it/);
+      expect(calls.at(-1)).toEqual(["pane", "close", "w1:p2"]);
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
+  test("a codex profile's own CODEX_HOME is where its rollout is read", async () => {
+    const box = codexSandbox();
+    try {
+      const alt = join(box.root, "codex-alt");
+      const day = join(alt, "sessions", "2026", "09", "30");
+      mkdirSync(day, { recursive: true });
+      const routes = join(box.root, "routes.json");
+      writeFileSync(
+        routes,
+        JSON.stringify({
+          profiles: { second: { kind: "codex", env: { CODEX_HOME: alt } } },
+          roles: { reviewer: { profiles: ["second"] } },
+        })
+      );
+      const { exec } = scriptedExec({
+        ...happyPath(),
+        "agent prompt": promptedWith((prompt) =>
+          writeFileSync(
+            join(day, "rollout-w.jsonl"),
+            [startedLine, askedLine(prompt), completeLine("LGTM")].join("\n")
+          )
+        ),
+        "agent get": getStatus("unknown"),
+        "pane close": closeOk,
+      });
+      const result = await dispatch(
+        {
+          ...options,
+          role: "reviewer",
+          kind: undefined,
+          routes,
+          wait: true,
+          timeout: 0,
+        },
+        box.env,
+        exec
+      );
+      expect(result).toMatchObject({ status: "done", output: "LGTM" });
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
+  test("a codex dispatch that cannot save its turn record closes the pane", async () => {
+    const box = codexSandbox();
+    try {
+      writeFileSync(join(box.root, "tmp"), "not a directory");
+      const { calls, exec } = scriptedExec({
+        ...happyPath(),
+        "agent get": getStatus("working"),
+        "pane close": closeOk,
+      });
+      await expect(
+        dispatch({ ...options, kind: "codex" }, box.env, exec)
+      ).rejects.toThrow();
+      expect(calls.at(-1)).toEqual(["pane", "close", "w1:p2"]);
+      expect(calls.some((args) => commandKey(args) === "agent prompt")).toBe(
+        false
+      );
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
+  test("collect finishes a codex worker from the turn its dispatch recorded", async () => {
+    const box = codexSandbox();
+    try {
+      let typed = "";
+      const handed = scriptedExec({
+        ...happyPath(),
+        "agent prompt": promptedWith((prompt) => {
+          typed = prompt;
+          box.rollout("w", startedLine, askedLine(prompt));
+        }),
+        "agent get": getStatus("working"),
+      });
+      await dispatch(
+        { ...options, name: "ci-review", kind: "codex" },
+        box.env,
+        handed.exec
+      );
+      box.rollout("w", startedLine, askedLine(typed), completeLine("LGTM"));
+      const pane = codexGet("unknown");
+      const { calls, exec } = scriptedExec({
+        "agent get": {
+          ...pane,
+          stdout: pane.stdout.replace("w1:p7", "w1:p2"),
+        },
+        "pane close": closeOk,
+      });
+      const result = await collect(collectOptions, box.env, exec);
+      expect(result).toEqual({
+        agent: "ci-review",
+        pane: "w1:p2",
+        kind: "codex",
+        status: "done",
+        blocked: false,
+        paneClosed: true,
+        output: "LGTM",
+      });
+      expect(calls.some((args) => commandKey(args) === "agent wait")).toBe(
+        false
+      );
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
+  test("collect refuses a codex worker it has no dispatch record for and leaves it open", async () => {
+    const box = codexSandbox();
+    try {
+      const { calls, exec } = scriptedExec({
+        "agent get": codexGet("unknown"),
+      });
+      await expect(collect(collectOptions, box.env, exec)).rejects.toThrow(
+        /no dispatch record for ci-review/
+      );
+      expect(calls.some((args) => commandKey(args) === "pane close")).toBe(
+        false
+      );
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
     }
   });
 });

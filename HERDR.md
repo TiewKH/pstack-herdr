@@ -43,11 +43,12 @@ bun <poteto-mode>/scripts/herdr-dispatch.ts \
   --wait
 ```
 
-1. The dispatcher opens a background tab, starts the CLI, and waits for it to report idle.
+1. The dispatcher opens a background tab, starts the CLI, and waits for it to report idle. Herdr 0.9.2+ never reports a ready Codex composer as idle, so `unknown` also ends the wait for a Codex worker.
 2. It types the prompt and counts it delivered once the agent leaves idle within `PSTACK_HERDR_DELIVERY_WINDOW_MS` (default 8000 ms). It retries once. A prompt that is rejected or never lands closes the pane and puts the worker's last screen in the error.
 3. With `--wait`, it waits up to `--timeout` (default `orchestration.default_timeout_ms`, 180000 ms). `agent start` gets at most the 300000 ms Herdr accepts.
-4. A `done` or `idle` status counts only when a transcript written after the prompt quotes its first line: a Codex rollout under `$CODEX_HOME/sessions`, or the Claude session file Herdr names. Without one, the dispatcher closes the pane and throws. Herdr reads a CLI that booted and stalled as a finished turn.
-5. A verified worker's output is read and its pane closed. `--keep-pane` keeps it open.
+4. For a Claude worker, a `done` or `idle` status counts only when the session file Herdr names, written after the prompt, quotes its first line. Without one, the dispatcher closes the pane and throws. Herdr reads a CLI that booted and stalled as a finished turn.
+5. The dispatcher appends a marker line, `[pstack-herdr turn <name>-<time>]`, to every Codex prompt. A Codex worker's turn ends when the rollout that quotes the marker, under the worker's `$CODEX_HOME/sessions`, records `task_complete` after it, whatever Herdr reports. The prompt also counts as delivered once that rollout quotes the marker. Herdr 0.9.2+ reads a finished Codex turn as `unknown`, and 0.9.1 can read a running one as `idle`. The dispatcher polls the rollout, returns `done` with the turn's final message as the output, and reports `working` while the rollout shows the turn still open. The dispatch saves the pane, sessions directory, marker, and start time to `$TMPDIR/pstack-herdr/<name>.json` before it types the prompt, so `--collect` checks the same turn.
+6. A verified worker's output is read and its pane closed. `--keep-pane` keeps it open.
 
 `working`, `blocked`, and `unknown` panes stay open. `blocked` means the worker is waiting on an approval or question, so inspect it. `unknown` is not completion. Finish a `working` worker with `herdr-dispatch.ts --collect --name <name>`, which waits, reads the output, and closes the pane once it is done. A dispatch or `--collect` stopped by SIGTERM, SIGINT, or SIGHUP while waiting closes the worker's pane first. SIGKILL cannot be caught and leaves the pane open.
 

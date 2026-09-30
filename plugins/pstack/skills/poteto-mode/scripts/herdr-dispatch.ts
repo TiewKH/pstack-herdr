@@ -1,8 +1,15 @@
 #!/usr/bin/env bun
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { constants, homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { constants, homedir, tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import { ensureDependenciesInstalled } from "./bootstrap.ts";
 import {
   CONFIG_HOMES,
@@ -90,6 +97,24 @@ export interface TurnEvidenceQuery {
 // True when a worker transcript written since `since` records the prompt.
 export type TurnEvidence = (query: TurnEvidenceQuery) => boolean;
 
+// Herdr 0.9.2+ reads a finished Codex turn as `unknown` and 0.9.1 can read a running one
+// as `idle`, so a Codex turn ends when its rollout records `task_complete` after the prompt.
+export type CodexTurn =
+  | { state: "absent" }
+  | { state: "running" }
+  | { state: "complete"; message: string | undefined };
+
+// `root` is the worker's `$CODEX_HOME/sessions`; `needle` is the marker line unique to this dispatch.
+export interface CodexTurnQuery {
+  root: string;
+  needle: string;
+  since: number;
+}
+
+interface CodexTurnRecord extends CodexTurnQuery {
+  pane: string;
+}
+
 export class HerdrError extends Error {
   readonly command: string;
   readonly code: string | undefined;
@@ -112,6 +137,7 @@ export interface DispatchPlan {
   prompt: string;
   placeArgs: string[];
   startTail: string[];
+  codexTurn?: Omit<CodexTurnQuery, "since">;
 }
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -140,6 +166,11 @@ const LONG_ARG_CHARS = 120;
 // `done` or `idle` verdict is only believed when one written after the prompt contains it.
 const EVIDENCE_SKEW_MS = 2000;
 const EVIDENCE_NEEDLE_CHARS = 120;
+const TURN_POLL_MS = 1000;
+const SETTLED_BEFORE_PROMPT: Record<AgentKind, AgentStatus[]> = {
+  claude: ["idle", "blocked"],
+  codex: ["idle", "blocked", "unknown"],
+};
 
 function asObject(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -518,6 +549,76 @@ export function turnEvidence(query: TurnEvidenceQuery): boolean {
   });
 }
 
+function taskCompleteMessage(
+  line: string
+): { message: string | undefined } | undefined {
+  if (!line.includes('"task_complete"')) return undefined;
+  try {
+    const entry = JSON.parse(line);
+    const payload = entry?.payload;
+    if (entry?.type !== "event_msg" || payload?.type !== "task_complete")
+      return undefined;
+    const message = payload.last_agent_message;
+    return { message: typeof message === "string" ? message : undefined };
+  } catch {
+    return undefined;
+  }
+}
+
+export function codexTurn(query: CodexTurnQuery): CodexTurn {
+  let turn: CodexTurn = { state: "absent" };
+  for (const file of transcriptsSince(query.root, query.since)) {
+    let lines: string[];
+    try {
+      lines = readFileSync(file, "utf8").split("\n");
+    } catch {
+      continue;
+    }
+    const asked = lines.findIndex((line) => line.includes(query.needle));
+    if (asked === -1) continue;
+    for (const line of lines.slice(asked + 1)) {
+      const complete = taskCompleteMessage(line);
+      if (complete) return { state: "complete", ...complete };
+    }
+    turn = { state: "running" };
+  }
+  return turn;
+}
+
+function turnRecordPath(name: string, env: NodeJS.ProcessEnv): string {
+  return join(env.TMPDIR ?? tmpdir(), "pstack-herdr", `${name}.json`);
+}
+
+function saveTurnRecord(
+  name: string,
+  record: CodexTurnRecord,
+  env: NodeJS.ProcessEnv
+): void {
+  const path = turnRecordPath(name, env);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(record));
+}
+
+function loadTurnRecord(
+  name: string,
+  pane: string,
+  env: NodeJS.ProcessEnv
+): CodexTurnRecord {
+  try {
+    const record = JSON.parse(readFileSync(turnRecordPath(name, env), "utf8"));
+    if (
+      record.pane === pane &&
+      typeof record.root === "string" &&
+      typeof record.needle === "string" &&
+      typeof record.since === "number"
+    )
+      return record;
+  } catch {}
+  throw new Error(
+    `no dispatch record for ${name} in pane ${pane}, so its Codex turn cannot be checked; read it with herdr agent read ${name} --source visible`
+  );
+}
+
 function resolvedPrompt(options: DispatchOptions): string {
   if (options.prompt && options.promptFile) {
     throw new Error("use either --prompt or --prompt-file, not both");
@@ -665,6 +766,17 @@ export function planDispatch(
     PSTACK_HERDR_DEPTH: String(nesting.next),
     PSTACK_HERDR_PARENT_KIND: kind,
   };
+  const prompt = applyReadonlyPrompt(resolvedPrompt(options), options.readonly);
+  const turn =
+    kind === "codex"
+      ? {
+          root: join(
+            configHome("codex", { ...env, ...childEnv }, homedir()),
+            "sessions"
+          ),
+          needle: `[pstack-herdr turn ${options.name}-${Date.now().toString(36)}]`,
+        }
+      : undefined;
   return {
     profile: chosen.name,
     kind,
@@ -676,7 +788,8 @@ export function planDispatch(
       DELIVERY_WINDOW_MS,
       "PSTACK_HERDR_DELIVERY_WINDOW_MS"
     ),
-    prompt: applyReadonlyPrompt(resolvedPrompt(options), options.readonly),
+    prompt: turn ? `${prompt}\n\n${turn.needle}` : prompt,
+    ...(turn ? { codexTurn: turn } : {}),
     placeArgs: placementArgs(options, resolve(options.cwd), envFlags(childEnv)),
     startTail: agentStartTail(
       kind,
@@ -759,6 +872,7 @@ async function visibleScreen(name: string, exec: HerdrExec): Promise<string> {
 
 async function settleBeforePrompt(
   name: string,
+  kind: AgentKind,
   timeout: number,
   exec: HerdrExec
 ): Promise<void> {
@@ -768,10 +882,7 @@ async function settleBeforePrompt(
         "agent",
         "wait",
         name,
-        "--until",
-        "idle",
-        "--until",
-        "blocked",
+        ...SETTLED_BEFORE_PROMPT[kind].flatMap((status) => ["--until", status]),
         "--timeout",
         String(timeout),
       ],
@@ -785,10 +896,12 @@ async function settleBeforePrompt(
 async function leftIdle(
   name: string,
   windowMs: number,
+  landed: () => boolean,
   exec: HerdrExec
 ): Promise<boolean> {
   const deadline = Date.now() + windowMs;
   for (;;) {
+    if (landed()) return true;
     const status = agentStatus(
       await runHerdrJson(["agent", "get", name], exec)
     );
@@ -803,11 +916,12 @@ async function deliverPrompt(
   name: string,
   prompt: string,
   windowMs: number,
+  landed: () => boolean,
   exec: HerdrExec
 ): Promise<void> {
   for (let attempt = 1; attempt <= PROMPT_ATTEMPTS; attempt += 1) {
     await runHerdrCommand(["agent", "prompt", name, prompt], exec);
-    if (await leftIdle(name, windowMs, exec)) return;
+    if (await leftIdle(name, windowMs, landed, exec)) return;
   }
   throw new Error(
     `prompt to ${name} was not delivered after ${PROMPT_ATTEMPTS} attempts: the agent never left idle`
@@ -874,6 +988,58 @@ async function finish(
   return { status, blocked: status === "blocked", paneClosed, output };
 }
 
+function neverRan(
+  name: string,
+  kind: AgentKind,
+  status: AgentStatus,
+  since: number
+): Error {
+  return new Error(
+    `${name} reports ${status}, but no ${kind} transcript written since ` +
+      `${new Date(since + EVIDENCE_SKEW_MS).toISOString()} records the prompt: the worker never ran it`
+  );
+}
+
+async function settleCodex(
+  name: string,
+  record: CodexTurnRecord,
+  timeout: number,
+  keepPane: boolean,
+  env: NodeJS.ProcessEnv,
+  exec: HerdrExec
+): Promise<Settlement> {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const turn = codexTurn(record);
+    if (turn.state === "complete") {
+      const output = turn.message ?? (await visibleScreen(name, exec));
+      if (!keepPane) {
+        await runHerdrCommand(["pane", "close", record.pane], exec);
+        rmSync(turnRecordPath(name, env), { force: true });
+      }
+      return { status: "done", blocked: false, paneClosed: !keepPane, output };
+    }
+    const status = agentStatus(
+      await runHerdrJson(["agent", "get", name], exec)
+    );
+    if (status === "blocked" || Date.now() >= deadline) {
+      const screen = await visibleScreen(name, exec);
+      if (turn.state === "absent" && (status === "done" || status === "idle")) {
+        await closePane(record.pane, exec);
+        throw withScreen(neverRan(name, "codex", status, record.since), screen);
+      }
+      const live = turn.state === "running" && status !== "blocked";
+      return {
+        status: live ? "working" : status,
+        blocked: status === "blocked",
+        paneClosed: false,
+        output: screen,
+      };
+    }
+    await sleep(TURN_POLL_MS);
+  }
+}
+
 export async function dispatch(
   options: DispatchOptions,
   env: NodeJS.ProcessEnv = process.env,
@@ -887,12 +1053,22 @@ export async function dispatch(
     options.placement
   );
   onPane(pane);
-  let promptedAt = Date.now();
+  let since = Date.now() - EVIDENCE_SKEW_MS;
+  const record = () =>
+    plan.codexTurn ? { ...plan.codexTurn, pane, since } : undefined;
   try {
     await startAgent(startArgs(options.name, pane, plan), exec);
-    await settleBeforePrompt(options.name, plan.startTimeout, exec);
-    promptedAt = Date.now();
-    await deliverPrompt(options.name, plan.prompt, plan.deliveryWindow, exec);
+    await settleBeforePrompt(options.name, plan.kind, plan.startTimeout, exec);
+    since = Date.now() - EVIDENCE_SKEW_MS;
+    const turn = record();
+    if (turn) saveTurnRecord(options.name, turn, env);
+    await deliverPrompt(
+      options.name,
+      plan.prompt,
+      plan.deliveryWindow,
+      () => turn !== undefined && codexTurn(turn).state !== "absent",
+      exec
+    );
   } catch (error) {
     if (leavesPaneOpen(error)) throw error;
     const screen = await visibleScreen(options.name, exec);
@@ -907,13 +1083,26 @@ export async function dispatch(
     depth: plan.depth,
   };
   if (!options.wait) return handle;
+  const turn = record();
+  if (turn)
+    return {
+      ...handle,
+      ...(await settleCodex(
+        options.name,
+        turn,
+        plan.timeout,
+        options.keepPane,
+        env,
+        exec
+      )),
+    };
   const agent = await awaitSettled(options.name, plan.timeout, exec);
   const status = agentStatus(agent);
   if (status === "done" || status === "idle") {
     const ran = evidence({
       kind: plan.kind,
       prompt: plan.prompt,
-      since: promptedAt - EVIDENCE_SKEW_MS,
+      since,
       sessionId: agentSessionId(agent),
       env,
     });
@@ -921,10 +1110,7 @@ export async function dispatch(
       const screen = await visibleScreen(options.name, exec);
       await closePane(pane, exec);
       throw withScreen(
-        new Error(
-          `${options.name} reports ${status}, but no ${plan.kind} transcript written since ` +
-            `${new Date(promptedAt).toISOString()} records the prompt: the worker never ran it`
-        ),
+        neverRan(options.name, plan.kind, status, since),
         screen
       );
     }
@@ -935,7 +1121,8 @@ export async function dispatch(
   };
 }
 
-// A worker handed back as `working` already ran its prompt, so it needs no transcript check.
+// A Claude worker handed back as `working` already ran its prompt, so it needs no
+// transcript check; a Codex worker's turn is read from the rollout its dispatch recorded.
 export async function collect(
   options: CollectOptions,
   env: NodeJS.ProcessEnv = process.env,
@@ -952,6 +1139,20 @@ export async function collect(
     await runHerdrJson(["agent", "get", options.name], exec)
   );
   onPane(pane);
+  if (kind === "codex")
+    return {
+      agent: options.name,
+      pane,
+      kind,
+      ...(await settleCodex(
+        options.name,
+        loadTurnRecord(options.name, pane, env),
+        timeout,
+        options.keepPane,
+        env,
+        exec
+      )),
+    };
   const status = agentStatus(await awaitSettled(options.name, timeout, exec));
   return {
     agent: options.name,
