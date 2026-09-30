@@ -2,6 +2,12 @@
 
 This file is the release changelog, with one `## <version> - <title>` entry per release, newest first. The Cursor-to-Claude rewrite rules live in [`tools/substitutions.json`](tools/substitutions.json), and the [sync boundary](CONTRIBUTING.md#the-sync-boundary) in `CONTRIBUTING.md` defines which changes belong upstream.
 
+## 0.9.55 - pstack-herdr: --kind narrows the route, and a model must match its CLI
+
+`herdr-dispatch.ts --kind` was read only when no route matched the role. With a route in place, `--role verifier --kind codex --model gpt-6.1-sol` ran the role's Claude profile, passed `--model gpt-6.1-sol` to Claude Code, and reported `done`.
+
+`--kind` now keeps only the role's profiles of that CLI before `first` or `spread` picks one, and throws `role <role> has no <kind> profile (pool: ...)` when none is left. `--kind` beside a `--profile` of the other CLI throws. The dispatcher also throws before opening a pane when the model it would pass belongs to the other CLI: `gpt-*`, `codex-*`, or `o<digit>` on Claude, and `claude-*` or `opus`, `fable`, `sonnet`, `haiku` on Codex. The routes parser applies the same check to each profile, so `/setup-pstack` cannot write such a pairing. A model ID that matches neither pattern passes as before.
+
 ## 0.9.54 - pstack-herdr: merge pstack-claude 0.9.53, newest models in Herdr setup
 
 This release merges `michael-denyer/pstack-claude` 0.9.44 through 0.9.53 into the fork. It brings upstream's reasoning effort per role through effort agents, the override sheet under `CLAUDE_CONFIG_DIR`, the planned generator writes and `generate.mjs --check`, `parseModels` at the generator boundary, the stamped Codex preamble, the `tools/forks.json` sync ledger, and the Prettier check on `poteto-mode/scripts`. The version moves to 0.9.54 so installed copies on either line refresh.

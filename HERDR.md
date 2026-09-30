@@ -21,7 +21,7 @@ When `HERDR_ENV=1`, pstack delegates through [`herdr-dispatch.ts`](plugins/pstac
 `/setup-pstack` writes `~/.config/pstack-herdr/routes.yaml` through `configure-herdr.ts`. Do not edit it by hand. [`config/routes.example.yaml`](config/routes.example.yaml) shows the format.
 
 - A **profile** names a CLI (`kind: claude` or `codex`), a `model`, an optional `effort`, and optional `env`.
-- A **role** names a pool of profiles and a `strategy`. `first` always takes the first profile. `spread` hashes the worker name over the pool.
+- A **role** names a pool of profiles and a `strategy`. `first` always takes the first profile. `spread` hashes the worker name over the pool. `--kind` keeps only the pool's profiles of that CLI before the strategy runs.
 - Write a full model ID such as `claude-opus-5-5` or `gpt-6-sol` to pin a version. A family name runs whichever model is current in that family. setup-pstack's Models section lists the confirmed IDs.
 - `effort` becomes `--effort <level>` for Claude or `-c model_reasoning_effort="<level>"` for Codex. Omit it to use the CLI's default.
 - One authenticated profile can back many workers, which share its rate and usage limits. For a second account, give a profile its own `CLAUDE_CONFIG_DIR` or `CODEX_HOME`. Leave the default home (`~/.claude`, `~/.codex`) out. Claude Code keeps its onboarding state under `$CLAUDE_CONFIG_DIR`, so a worker given `~/.claude` boots into first-run onboarding. The dispatcher drops a default home unless the shell that started Herdr exports a different one.

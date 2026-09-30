@@ -132,12 +132,26 @@ const VALID_EFFORTS: Record<AgentKind, readonly string[]> = {
   codex: ["low", "medium", "high", "xhigh", "max", "ultra"],
 };
 
+// The CLI a model ID clearly belongs to, or undefined when it could be either.
+export function modelKind(model: string): AgentKind | undefined {
+  if (/^claude-|^(opus|fable|sonnet|haiku)(\[|$)/.test(model)) return "claude";
+  if (/^(gpt-|codex-|o\d)/.test(model)) return "codex";
+  return undefined;
+}
+
 function parseProfile(raw: unknown, label: string): Profile {
   const profile = asObject(raw, label);
   const kind = parseAgentKind(profile.kind, `${label}.kind`);
   const parsed: Profile = { kind };
   const model = optionalString(profile.model, `${label}.model`);
-  if (model) parsed.model = model;
+  if (model) {
+    const owner = modelKind(model);
+    if (owner && owner !== kind)
+      throw new Error(
+        `${label}.model ${model} is a ${owner} model, but the profile runs ${kind}`
+      );
+    parsed.model = model;
+  }
   const effort = optionalString(profile.effort, `${label}.effort`);
   if (effort) {
     if (!VALID_EFFORTS[kind].includes(effort)) {

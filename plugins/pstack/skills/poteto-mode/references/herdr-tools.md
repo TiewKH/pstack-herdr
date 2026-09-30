@@ -38,7 +38,7 @@ bun <poteto-mode>/scripts/herdr-dispatch.ts \
 
 `--readonly` prepends a no-write constraint to the prompt and passes Claude `--disallowedTools Write,Edit` or Codex `--sandbox read-only`. The brief must still prohibit writes.
 
-Use `--profile`, `--kind`, `--model`, or `--effort` only to override routing deliberately.
+Use `--profile`, `--kind`, `--model`, or `--effort` only to override routing deliberately. `--kind` narrows the role's pool to profiles of that CLI and fails when the pool has none. A `--model` that belongs to the other CLI (`gpt-*` on Claude, `claude-*` or a Claude family name on Codex) fails before a pane opens.
 
 For parallel fan-out, launch dispatcher processes concurrently rather than dispatching one and waiting before starting the next. Each dispatcher creates its own Herdr pane and agent. Collect each JSON result after all launches have begun.
 

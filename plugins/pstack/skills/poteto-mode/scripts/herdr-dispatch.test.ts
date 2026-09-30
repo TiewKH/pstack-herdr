@@ -138,6 +138,70 @@ roles:
   });
 });
 
+describe("herdr-dispatch kind and model checks", () => {
+  const env = { HERDR_ENV: "1" };
+  const dir = mkdtempSync(join(tmpdir(), "pstack-herdr-kind-"));
+  const routes = join(dir, "routes.json");
+  writeFileSync(
+    routes,
+    JSON.stringify({
+      profiles: {
+        "claude-a": { kind: "claude", model: "claude-sonnet-5" },
+        "codex-a": { kind: "codex", model: "gpt-6-sol" },
+      },
+      roles: {
+        explorer: { profiles: ["claude-a", "codex-a"], strategy: "first" },
+        judgment: { profiles: ["claude-a"], strategy: "first" },
+      },
+    })
+  );
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  const plan = (overrides: Partial<DispatchOptions>) =>
+    planDispatch({ ...options, kind: undefined, routes, ...overrides }, env);
+
+  test("--kind picks the role's profile of that kind", () => {
+    expect(plan({ role: "explorer" }).profile).toBe("claude-a");
+    const codex = plan({ role: "explorer", kind: "codex" });
+    expect(codex.profile).toBe("codex-a");
+    expect(codex.kind).toBe("codex");
+  });
+
+  test("--kind that no profile in the role's pool runs throws naming the pool", () => {
+    expect(() => plan({ role: "judgment", kind: "codex" })).toThrow(
+      "role judgment has no codex profile (pool: claude-a)"
+    );
+  });
+
+  test("--kind that contradicts --profile throws", () => {
+    expect(() => plan({ profile: "claude-a", kind: "codex" })).toThrow(
+      "--profile claude-a runs claude, not --kind codex"
+    );
+  });
+
+  test("a Codex model on a Claude worker throws before any pane opens", () => {
+    expect(() => plan({ role: "judgment", model: "gpt-6.1-sol" })).toThrow(
+      "model gpt-6.1-sol is a codex model, but profile claude-a runs claude"
+    );
+  });
+
+  test("a Claude model on a Codex worker throws", () => {
+    expect(() =>
+      plan({ role: "explorer", kind: "codex", model: "opus" })
+    ).toThrow("model opus is a claude model, but profile codex-a runs codex");
+  });
+
+  test("the fallback worker checks its model against its kind", () => {
+    expect(() =>
+      plan({ routes: emptyRoutes, kind: "claude", model: "gpt-6-sol" })
+    ).toThrow(
+      "model gpt-6-sol is a codex model, but profile parent runs claude"
+    );
+    expect(
+      plan({ routes: emptyRoutes, kind: "codex", model: "gpt-6-sol" }).kind
+    ).toBe("codex");
+  });
+});
+
 describe("herdr-dispatch contracts", () => {
   test("explicit missing routes fail closed", () => {
     expect(() => loadRoutes("/tmp/pstack-herdr-missing-routes.yaml")).toThrow(
