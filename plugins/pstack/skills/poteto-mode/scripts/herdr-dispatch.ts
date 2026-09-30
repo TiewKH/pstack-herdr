@@ -104,18 +104,15 @@ export type CodexTurn =
   | { state: "running" }
   | { state: "complete"; message: string | undefined };
 
+// `root` is the worker's `$CODEX_HOME/sessions`; `needle` is the marker line unique to this dispatch.
 export interface CodexTurnQuery {
+  root: string;
   needle: string;
   since: number;
-  env?: NodeJS.ProcessEnv;
-  home?: string;
 }
 
-// What `--collect` needs to find the turn a dispatch typed into a Codex pane.
-interface CodexTurnRecord {
+interface CodexTurnRecord extends CodexTurnQuery {
   pane: string;
-  needle: string;
-  since: number;
 }
 
 export class HerdrError extends Error {
@@ -140,6 +137,7 @@ export interface DispatchPlan {
   prompt: string;
   placeArgs: string[];
   startTail: string[];
+  codexTurn?: Omit<CodexTurnQuery, "since">;
 }
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -568,13 +566,8 @@ function taskCompleteMessage(
 }
 
 export function codexTurn(query: CodexTurnQuery): CodexTurn {
-  const env = query.env ?? process.env;
-  const root = join(
-    configHome("codex", env, query.home ?? homedir()),
-    "sessions"
-  );
   let turn: CodexTurn = { state: "absent" };
-  for (const file of transcriptsSince(root, query.since)) {
+  for (const file of transcriptsSince(query.root, query.since)) {
     let lines: string[];
     try {
       lines = readFileSync(file, "utf8").split("\n");
@@ -615,6 +608,7 @@ function loadTurnRecord(
     const record = JSON.parse(readFileSync(turnRecordPath(name, env), "utf8"));
     if (
       record.pane === pane &&
+      typeof record.root === "string" &&
       typeof record.needle === "string" &&
       typeof record.since === "number"
     )
@@ -772,6 +766,17 @@ export function planDispatch(
     PSTACK_HERDR_DEPTH: String(nesting.next),
     PSTACK_HERDR_PARENT_KIND: kind,
   };
+  const prompt = applyReadonlyPrompt(resolvedPrompt(options), options.readonly);
+  const turn =
+    kind === "codex"
+      ? {
+          root: join(
+            configHome("codex", { ...env, ...childEnv }, homedir()),
+            "sessions"
+          ),
+          needle: `[pstack-herdr turn ${options.name}-${Date.now().toString(36)}]`,
+        }
+      : undefined;
   return {
     profile: chosen.name,
     kind,
@@ -783,7 +788,8 @@ export function planDispatch(
       DELIVERY_WINDOW_MS,
       "PSTACK_HERDR_DELIVERY_WINDOW_MS"
     ),
-    prompt: applyReadonlyPrompt(resolvedPrompt(options), options.readonly),
+    prompt: turn ? `${prompt}\n\n${turn.needle}` : prompt,
+    ...(turn ? { codexTurn: turn } : {}),
     placeArgs: placementArgs(options, resolve(options.cwd), envFlags(childEnv)),
     startTail: agentStartTail(
       kind,
@@ -890,10 +896,12 @@ async function settleBeforePrompt(
 async function leftIdle(
   name: string,
   windowMs: number,
+  landed: () => boolean,
   exec: HerdrExec
 ): Promise<boolean> {
   const deadline = Date.now() + windowMs;
   for (;;) {
+    if (landed()) return true;
     const status = agentStatus(
       await runHerdrJson(["agent", "get", name], exec)
     );
@@ -908,11 +916,12 @@ async function deliverPrompt(
   name: string,
   prompt: string,
   windowMs: number,
+  landed: () => boolean,
   exec: HerdrExec
 ): Promise<void> {
   for (let attempt = 1; attempt <= PROMPT_ATTEMPTS; attempt += 1) {
     await runHerdrCommand(["agent", "prompt", name, prompt], exec);
-    if (await leftIdle(name, windowMs, exec)) return;
+    if (await leftIdle(name, windowMs, landed, exec)) return;
   }
   throw new Error(
     `prompt to ${name} was not delivered after ${PROMPT_ATTEMPTS} attempts: the agent never left idle`
@@ -1001,7 +1010,7 @@ async function settleCodex(
 ): Promise<Settlement> {
   const deadline = Date.now() + timeout;
   for (;;) {
-    const turn = codexTurn({ needle: record.needle, since: record.since, env });
+    const turn = codexTurn(record);
     if (turn.state === "complete") {
       const output = turn.message ?? (await visibleScreen(name, exec));
       if (!keepPane) {
@@ -1044,12 +1053,22 @@ export async function dispatch(
     options.placement
   );
   onPane(pane);
-  let promptedAt = Date.now();
+  let since = Date.now() - EVIDENCE_SKEW_MS;
+  const record = () =>
+    plan.codexTurn ? { ...plan.codexTurn, pane, since } : undefined;
   try {
     await startAgent(startArgs(options.name, pane, plan), exec);
     await settleBeforePrompt(options.name, plan.kind, plan.startTimeout, exec);
-    promptedAt = Date.now();
-    await deliverPrompt(options.name, plan.prompt, plan.deliveryWindow, exec);
+    since = Date.now() - EVIDENCE_SKEW_MS;
+    const turn = record();
+    if (turn) saveTurnRecord(options.name, turn, env);
+    await deliverPrompt(
+      options.name,
+      plan.prompt,
+      plan.deliveryWindow,
+      () => turn !== undefined && codexTurn(turn).state !== "absent",
+      exec
+    );
   } catch (error) {
     if (leavesPaneOpen(error)) throw error;
     const screen = await visibleScreen(options.name, exec);
@@ -1063,19 +1082,14 @@ export async function dispatch(
     kind: plan.kind,
     depth: plan.depth,
   };
-  const record = {
-    pane,
-    needle: promptNeedle(plan.prompt),
-    since: promptedAt - EVIDENCE_SKEW_MS,
-  };
-  if (plan.kind === "codex") saveTurnRecord(options.name, record, env);
   if (!options.wait) return handle;
-  if (plan.kind === "codex")
+  const turn = record();
+  if (turn)
     return {
       ...handle,
       ...(await settleCodex(
         options.name,
-        record,
+        turn,
         plan.timeout,
         options.keepPane,
         env,
@@ -1088,7 +1102,7 @@ export async function dispatch(
     const ran = evidence({
       kind: plan.kind,
       prompt: plan.prompt,
-      since: record.since,
+      since,
       sessionId: agentSessionId(agent),
       env,
     });
@@ -1096,7 +1110,7 @@ export async function dispatch(
       const screen = await visibleScreen(options.name, exec);
       await closePane(pane, exec);
       throw withScreen(
-        neverRan(options.name, plan.kind, status, record.since),
+        neverRan(options.name, plan.kind, status, since),
         screen
       );
     }

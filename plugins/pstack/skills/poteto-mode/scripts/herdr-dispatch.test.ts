@@ -1289,7 +1289,11 @@ describe("herdr-dispatch codex turns", () => {
         since: Date.now() - 1000,
       };
       expect(codexTurn(query)).toEqual({ state: "absent" });
-      box.rollout("b", startedLine, askedLine("ping\n\n[pstack-herdr turn b-1]"));
+      box.rollout(
+        "b",
+        startedLine,
+        askedLine("ping\n\n[pstack-herdr turn b-1]")
+      );
       expect(codexTurn(query)).toEqual({ state: "running" });
       box.rollout(
         "a",
@@ -1551,7 +1555,9 @@ describe("herdr-dispatch codex turns", () => {
   test("collect refuses a codex worker it has no dispatch record for and leaves it open", async () => {
     const box = codexSandbox();
     try {
-      const { calls, exec } = scriptedExec({ "agent get": codexGet("unknown") });
+      const { calls, exec } = scriptedExec({
+        "agent get": codexGet("unknown"),
+      });
       await expect(collect(collectOptions, box.env, exec)).rejects.toThrow(
         /no dispatch record for ci-review/
       );
