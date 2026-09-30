@@ -43,6 +43,7 @@ describe("committed models.json", () => {
   test("setup-pstack lists the Herdr worker IDs by label and ID", () => {
     const text = readFileSync(join(skillsDir, "setup-pstack/SKILL.md"), "utf8");
     expect(text).toContain("- Herdr Claude worker IDs: Opus 5.5 (`claude-opus-5-5`), ");
+    expect(text).toContain("Sonnet 5.5 (`claude-sonnet-5-5`), Sonnet 5 (`claude-sonnet-5`)");
     expect(text).toContain("- Herdr Codex worker IDs: GPT-6.1-Sol (`gpt-6.1-sol`), GPT-6-Sol (`gpt-6-sol`), ");
   });
 });
