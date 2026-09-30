@@ -39,17 +39,25 @@ export type ReviewDecision =
   | "CHANGES_REQUESTED"
   | "REVIEW_REQUIRED"
   | null;
-export interface PullRequestFacts extends Omit<LandingRevision, "headRefOid" | "baseRefOid"> {
+interface PullRequestFields {
+  readonly context: PrContext;
   readonly mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
   readonly mergeStateStatus: MergeStateStatus;
   readonly reviewDecision: ReviewDecision;
   readonly headRefOid: string | null;
   readonly baseRefOid: string | null;
   readonly headRefName: string;
+  readonly baseRefName: string;
   readonly state: "OPEN" | "CLOSED" | "MERGED";
   readonly mergedAt: string | null;
   readonly isDraft: boolean;
 }
+export type PullRequestFacts = PullRequestFields &
+  (
+    | (LandingRevision & { readonly state: "OPEN" })
+    | { readonly state: "CLOSED" }
+    | { readonly state: "MERGED" }
+  );
 export interface OpenPullRequest {
   readonly number: PrNumber;
   readonly headRepository: Repository | null;
@@ -152,7 +160,7 @@ export type PrSnapshot =
   | {
       readonly kind: "open";
       readonly context: PrContext;
-      readonly facts: PullRequestFacts & LandingRevision;
+      readonly facts: Extract<PullRequestFacts, { readonly state: "OPEN" }>;
       readonly threads: readonly ReviewThread[];
       readonly ci: CiState;
       readonly reviewAutomationRunning: boolean;
@@ -400,14 +408,12 @@ export interface GitHubReader {
   originRepo(): Promise<Repository | null>;
   currentPr(pr: PrNumber | null): Promise<PrContext>;
   pullRequest(context: PrContext): Promise<PullRequestFacts>;
-  revision(
-    context: PrContext,
-  ): Promise<LandingRevision>;
+  revision(context: PrContext): Promise<LandingRevision>;
   openPullRequests(repository: Repository): Promise<readonly OpenPullRequest[]>;
   checksFastPath(context: PrContext): Promise<ChecksFastPath>;
   checkRollupPage(
     context: PrContext,
-    after: string | null,
+    after: string | null
   ): Promise<RollupPage>;
   reviewThreads(context: PrContext): Promise<readonly ReviewThread[]>;
   commitRollups(context: PrContext): Promise<readonly CommitRollup[]>;

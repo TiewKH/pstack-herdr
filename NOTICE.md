@@ -1,6 +1,6 @@
 # NOTICE
 
-This repository is a fork of `michael-denyer/pstack-claude`, which ports upstream MIT-licensed pstack work to Claude Code and Codex. The fork's modifications and additions are also released under the [MIT license](LICENSE). All upstream copyright notices and license terms are preserved.
+This repository is a fork of `michael-denyer/pstack-claude`, which ports upstream MIT-licensed pstack work to Claude Code and Codex; pstack-claude's modifications and additions are (c) 2026 Michael Denyer. The fork's modifications and additions are also released under the [MIT license](LICENSE). All upstream copyright notices and license terms are preserved.
 
 ## Project lineage
 
@@ -42,18 +42,18 @@ Herdr is not vendored into this repository. Users install Herdr and its official
 
 ## What changed in the pstack-claude port
 
-The pstack-claude port is editorial, not mechanical. See [CHANGES.md](CHANGES.md) for the full per-skill audit of substitutions applied by that port.
+The pstack-claude port is editorial, not mechanical. [CHANGES.md](CHANGES.md) records each release's changes, and [`tools/substitutions.json`](tools/substitutions.json) lists the token rewrites with the reason for each.
 
 Summary of structural changes inherited by this fork:
 
 - Plugin content lives at `plugins/pstack/` (with its own `.claude-plugin/plugin.json`). The repo root holds `.claude-plugin/marketplace.json` and the LICENSE / NOTICE / README / CHANGES docs.
-- `.claude-plugin/marketplace.json` makes the repo installable via `/plugin marketplace add`.
-- `plugins/pstack/.codex-plugin/prompts/<name>.md` stubs make public skills reachable as slash commands on Codex.
-- Seven skills are imported from `cursor-team-kit`: `deslop`, `thermo-nuclear-code-quality-review`, `make-pr-easy-to-review`, `fix-ci`, `fix-merge-conflicts`, `get-pr-comments`, `what-did-i-get-done`.
-- `plugins/pstack/skills/babysit/` is independently authored as the Claude Code analog of Cursor's `/babysit` built-in.
-- `plugins/pstack/skills/poteto-mode/scripts/` is vendored from upstream with the pstack-claude port edits documented in CHANGES.md.
-- `plugins/pstack/agents/comment-sicko.md` is upstream's `Comment Sicko` agent, renamed to `comment-sicko` for Claude Code compatibility.
-- The Codex build shares the same `skills/` tree and uses `plugins/pstack/skills/poteto-mode/references/codex-tools.md` for Claude-to-Codex mappings.
+- `.claude-plugin/marketplace.json` added at repo root so the repo is installable via `/plugin marketplace add`. The marketplace's single plugin entry sources from `./plugins/pstack`.
+- `plugins/pstack/.codex-plugin/prompts/<name>.md` stubs added so each public skill is reachable as a slash command on Codex. Claude Code needs no stubs: the skill itself serves `/pstack:<name>`.
+- Seven skills imported from `cursor-team-kit`: `deslop`, `thermo-nuclear-code-quality-review`, `make-pr-easy-to-review`, `fix-ci`, `fix-merge-conflicts`, `get-pr-comments`, `what-did-i-get-done`. All copied verbatim — no rewiring needed.
+- `plugins/pstack/skills/babysit/` is independently authored as the Claude Code analog of Cursor's `/babysit` built-in. It has no upstream pstack equivalent; its workflow is informed by Cursor's public `/babysit` behavior. No code or prose was copied from any source.
+- `plugins/pstack/skills/poteto-mode/scripts/` is vendored from upstream (`watch-pr`, `orch`, `bootstrap.ts`, `package.json`, `bun.lock`). `worktree-audit.mjs` is a port-only rewrite of upstream's `worktree-audit.sh`, which `tools/upstream.json` excludes from sync; it reads `~/.claude/projects/` instead of Cursor's transcript directory and reports prunable worktrees. Port edits, each on the forked list `bun tools/sync.mjs --dry-run` prints: `bootstrap.ts` fails clearly under node and installs production dependencies only; `orch/store.ts` and `orch/orch.test.ts` carry the silent-failure fixes from #35; `package.json` typechecks the whole tree; `tsconfig.json` is port-only. Everything else is upstream's code under the upstream MIT license.
+- `plugins/pstack/agents/comment-sicko.md` is upstream's `Comment Sicko` agent, renamed to `comment-sicko` so the name works as a Claude Code `subagent_type`. The body is verbatim.
+- A Codex build shares the same `skills/` tree. It adds `plugins/pstack/.codex-plugin/plugin.json`, a root `.agents/plugins/marketplace.json`, and `plugins/pstack/skills/poteto-mode/references/codex-tools.md` (the Claude-to-Codex tool, model, built-in, and per-skill map). Affected skill entry points link to this map so direct invocation works without the optional Codex prompt stubs. See the [reference](docs/reference.md#codex).
 
 ## pstack-herdr modifications
 
@@ -76,9 +76,9 @@ Per the MIT license, modifications to pstack-derived material are permitted. Exi
 - `.agents/plugins/marketplace.json`
 - `plugins/pstack/skills/poteto-mode/references/codex-tools.md`
 - `plugins/pstack/.codex-plugin/prompts/*.md`
-- `plugins/pstack/skills/babysit/SKILL.md`
-- `plugins/pstack/hooks/hooks.json` and the original session-start mandate
-- `NOTICE.md`
+- `plugins/pstack/skills/babysit/SKILL.md` (independently authored; workflow informed by Cursor's public `/babysit` behavior)
+- `plugins/pstack/hooks/hooks.json`, `plugins/pstack/hooks/codex-hooks.json`, and `plugins/pstack/hooks/session-start-context.md` (each runtime's auto-fire hook and its mandate)
+- `NOTICE.md` (this file)
 - `NOTICE-skills.md`
 - `README.md`
 - `CHANGES.md`
