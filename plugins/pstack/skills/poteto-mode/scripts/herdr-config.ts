@@ -64,8 +64,15 @@ export function expandHome(value: string, home: string = homedir()): string {
   return value;
 }
 
-export function isDefaultConfigHome(kind: AgentKind, value: string, home: string = homedir()): boolean {
-  return resolve(expandHome(value, home)) === resolve(home, CONFIG_HOMES[kind].defaultDir);
+export function isDefaultConfigHome(
+  kind: AgentKind,
+  value: string,
+  home: string = homedir()
+): boolean {
+  return (
+    resolve(expandHome(value, home)) ===
+    resolve(home, CONFIG_HOMES[kind].defaultDir)
+  );
 }
 
 function asObject(value: unknown, label: string): Record<string, unknown> {
@@ -83,7 +90,10 @@ function optionalString(value: unknown, label: string): string | undefined {
   return value;
 }
 
-function optionalNonNegativeInt(value: unknown, label: string): number | undefined {
+function optionalNonNegativeInt(
+  value: unknown,
+  label: string
+): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new Error(`${label} must be a non-negative integer`);
@@ -106,9 +116,12 @@ function parseEnvMap(raw: unknown, label: string): Record<string, string> {
   const entries = asObject(raw, label);
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(entries)) {
-    if (!ENV_NAME.test(key)) throw new Error(`${label}.${key} is not a valid environment name`);
-    if (typeof value !== "string") throw new Error(`${label}.${key} must be a string`);
-    if (/[\r\n]/.test(value)) throw new Error(`${label}.${key} contains a newline`);
+    if (!ENV_NAME.test(key))
+      throw new Error(`${label}.${key} is not a valid environment name`);
+    if (typeof value !== "string")
+      throw new Error(`${label}.${key} must be a string`);
+    if (/[\r\n]/.test(value))
+      throw new Error(`${label}.${key} contains a newline`);
     env[key] = value;
   }
   return env;
@@ -134,7 +147,8 @@ function parseProfile(raw: unknown, label: string): Profile {
     }
     parsed.effort = effort;
   }
-  if (profile.env !== undefined) parsed.env = parseEnvMap(profile.env, `${label}.env`);
+  if (profile.env !== undefined)
+    parsed.env = parseEnvMap(profile.env, `${label}.env`);
   return parsed;
 }
 
@@ -144,7 +158,10 @@ function parseOrchestration(
 ): { max_depth?: number; default_timeout_ms?: number } {
   const orchestration = asObject(raw, label);
   return {
-    max_depth: optionalNonNegativeInt(orchestration.max_depth, `${label}.max_depth`),
+    max_depth: optionalNonNegativeInt(
+      orchestration.max_depth,
+      `${label}.max_depth`
+    ),
     default_timeout_ms: optionalNonNegativeInt(
       orchestration.default_timeout_ms,
       `${label}.default_timeout_ms`
@@ -186,7 +203,10 @@ export function validateRoutes(raw: unknown): RoutesConfig {
   const config: RoutesConfig = {};
 
   if (root.orchestration !== undefined) {
-    config.orchestration = parseOrchestration(root.orchestration, "orchestration");
+    config.orchestration = parseOrchestration(
+      root.orchestration,
+      "orchestration"
+    );
   }
 
   if (root.profiles !== undefined) {
@@ -194,7 +214,9 @@ export function validateRoutes(raw: unknown): RoutesConfig {
     const profiles: Record<string, Profile> = {};
     for (const [name, profileRaw] of Object.entries(profilesRaw)) {
       if (!PROFILE_NAME.test(name)) {
-        throw new Error(`profiles.${name} name must match ${PROFILE_NAME.source}`);
+        throw new Error(
+          `profiles.${name} name must match ${PROFILE_NAME.source}`
+        );
       }
       profiles[name] = parseProfile(profileRaw, `profiles.${name}`);
     }
@@ -228,7 +250,9 @@ export function parseRoutes(text: string): RoutesConfig {
   } else {
     const yaml = Bun.YAML;
     if (typeof yaml?.parse !== "function") {
-      throw new Error("this Bun build has no YAML parser; use JSON routes or upgrade Bun");
+      throw new Error(
+        "this Bun build has no YAML parser; use JSON routes or upgrade Bun"
+      );
     }
     raw = yaml.parse(trimmed);
   }
@@ -324,10 +348,12 @@ export function parseSetupInput(text: string): SetupRoutes {
 
   const parsedProfiles = routes.profiles;
   const roles = routes.roles;
-  if (!parsedProfiles) throw new Error("setup input.profiles must be a non-empty array");
+  if (!parsedProfiles)
+    throw new Error("setup input.profiles must be a non-empty array");
   if (!roles) throw new Error("setup input.roles must be an object");
   for (const role of REQUIRED_HERDR_ROLES) {
-    if (!roles[role]) throw new Error(`setup input.roles is missing required role: ${role}`);
+    if (!roles[role])
+      throw new Error(`setup input.roles is missing required role: ${role}`);
   }
 
   return {
@@ -337,7 +363,10 @@ export function parseSetupInput(text: string): SetupRoutes {
   };
 }
 
-export function buildRoutes(existing: RoutesConfig, input: SetupRoutes): RoutesConfig {
+export function buildRoutes(
+  existing: RoutesConfig,
+  input: SetupRoutes
+): RoutesConfig {
   const profiles: Record<string, Profile> = {};
 
   for (const name of Object.keys(input.profiles).sort()) {
@@ -358,7 +387,10 @@ export function buildRoutes(existing: RoutesConfig, input: SetupRoutes): RoutesC
 
   return {
     orchestration: {
-      max_depth: input.orchestration?.max_depth ?? existing.orchestration?.max_depth ?? 3,
+      max_depth:
+        input.orchestration?.max_depth ??
+        existing.orchestration?.max_depth ??
+        3,
       default_timeout_ms:
         input.orchestration?.default_timeout_ms ??
         existing.orchestration?.default_timeout_ms ??
@@ -374,9 +406,16 @@ function quote(value: string): string {
 }
 
 function orderedRoleNames(roles: Record<string, RoleRoute>): string[] {
-  const required = REQUIRED_HERDR_ROLES.filter((name) => roles[name] !== undefined);
+  const required = REQUIRED_HERDR_ROLES.filter(
+    (name) => roles[name] !== undefined
+  );
   const extras = Object.keys(roles)
-    .filter((name) => !REQUIRED_HERDR_ROLES.includes(name as (typeof REQUIRED_HERDR_ROLES)[number]))
+    .filter(
+      (name) =>
+        !REQUIRED_HERDR_ROLES.includes(
+          name as (typeof REQUIRED_HERDR_ROLES)[number]
+        )
+    )
     .sort();
   return [...required, ...extras];
 }
@@ -399,8 +438,10 @@ export function renderRoutesYaml(config: RoutesConfig): string {
   for (const name of Object.keys(profiles).sort()) {
     const profile = profiles[name];
     lines.push(`  ${name}:`, `    kind: ${profile.kind}`);
-    if (profile.model !== undefined) lines.push(`    model: ${quote(profile.model)}`);
-    if (profile.effort !== undefined) lines.push(`    effort: ${quote(profile.effort)}`);
+    if (profile.model !== undefined)
+      lines.push(`    model: ${quote(profile.model)}`);
+    if (profile.effort !== undefined)
+      lines.push(`    effort: ${quote(profile.effort)}`);
     const env = profile.env ?? {};
     if (Object.keys(env).length > 0) {
       lines.push("    env:");

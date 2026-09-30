@@ -25,9 +25,17 @@ async function main(): Promise<void> {
   const program = new Command("configure-herdr")
     .description("Deterministically write pstack Herdr routes from JSON input")
     .requiredOption("--input <path>", "JSON setup input")
-    .option("--output <path>", "routes output path", "~/.config/pstack-herdr/routes.yaml")
+    .option(
+      "--output <path>",
+      "routes output path",
+      "~/.config/pstack-herdr/routes.yaml"
+    )
     .option("--dry-run", "print canonical YAML without writing", false)
-    .option("--check", "validate input and existing output without writing", false);
+    .option(
+      "--check",
+      "validate input and existing output without writing",
+      false
+    );
 
   program.parse(process.argv);
   const options = program.opts<Options>();
@@ -43,7 +51,9 @@ async function main(): Promise<void> {
 
   if (options.check) {
     const yaml = renderRoutesYaml(next);
-    const current = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "";
+    const current = existsSync(outputPath)
+      ? readFileSync(outputPath, "utf8")
+      : "";
     if (current !== yaml) {
       throw new Error("routes file does not match the requested setup input");
     }
@@ -59,7 +69,9 @@ async function main(): Promise<void> {
 
 if (import.meta.main) {
   main().catch((error) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(
+      `${error instanceof Error ? error.message : String(error)}\n`
+    );
     process.exit(1);
   });
 }

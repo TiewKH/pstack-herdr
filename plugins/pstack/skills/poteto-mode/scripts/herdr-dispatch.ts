@@ -147,7 +147,10 @@ function asObject(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function optionalNonNegativeInt(value: unknown, label: string): number | undefined {
+function optionalNonNegativeInt(
+  value: unknown,
+  label: string
+): number | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new Error(`${label} must be a non-negative integer`);
@@ -170,9 +173,14 @@ export function parseAgentStatus(value: unknown): AgentStatus {
   }
 }
 
-function parseNonNegativeInt(raw: string | undefined, fallback: number, label: string): number {
+function parseNonNegativeInt(
+  raw: string | undefined,
+  fallback: number,
+  label: string
+): number {
   if (raw === undefined || raw === "") return fallback;
-  if (!/^\d+$/.test(raw)) throw new Error(`${label} must be a non-negative integer`);
+  if (!/^\d+$/.test(raw))
+    throw new Error(`${label} must be a non-negative integer`);
   return Number(raw);
 }
 
@@ -206,10 +214,17 @@ export function selectProfileName(
   }
 }
 
-export function inferParentKind(env: NodeJS.ProcessEnv = process.env): AgentKind | undefined {
+export function inferParentKind(
+  env: NodeJS.ProcessEnv = process.env
+): AgentKind | undefined {
   const explicit = env.PSTACK_HERDR_PARENT_KIND;
   if (explicit === "claude" || explicit === "codex") return explicit;
-  if (env.CLAUDECODE === "1" || env.CLAUDE_CODE_ENTRYPOINT || env.CLAUDE_CONFIG_DIR) return "claude";
+  if (
+    env.CLAUDECODE === "1" ||
+    env.CLAUDE_CODE_ENTRYPOINT ||
+    env.CLAUDE_CONFIG_DIR
+  )
+    return "claude";
   if (env.CODEX_THREAD_ID || env.CODEX_HOME) return "codex";
   return undefined;
 }
@@ -217,8 +232,10 @@ export function inferParentKind(env: NodeJS.ProcessEnv = process.env): AgentKind
 export function envFlags(env: Record<string, string>): string[] {
   const flags: string[] = [];
   for (const [key, value] of Object.entries(env)) {
-    if (!ENV_NAME.test(key)) throw new Error(`invalid environment variable name: ${key}`);
-    if (/[\r\n]/.test(value)) throw new Error(`environment ${key} contains a newline`);
+    if (!ENV_NAME.test(key))
+      throw new Error(`invalid environment variable name: ${key}`);
+    if (/[\r\n]/.test(value))
+      throw new Error(`environment ${key} contains a newline`);
     flags.push("--env", `${key}=${expandHome(value)}`);
   }
   return flags;
@@ -254,13 +271,18 @@ export function workerEnv(
   const env = { ...profileEnv };
   const { key } = CONFIG_HOMES[kind];
   const value = env[key];
-  if (value === undefined || !isDefaultConfigHome(kind, value, home)) return env;
+  if (value === undefined || !isDefaultConfigHome(kind, value, home))
+    return env;
   const inherited = ambient[key];
-  if (inherited === undefined || isDefaultConfigHome(kind, inherited, home)) delete env[key];
+  if (inherited === undefined || isDefaultConfigHome(kind, inherited, home))
+    delete env[key];
   return env;
 }
 
-export function effortAgentArgs(kind: AgentKind, effort: string | undefined): string[] {
+export function effortAgentArgs(
+  kind: AgentKind,
+  effort: string | undefined
+): string[] {
   if (!effort) return [];
   switch (kind) {
     case "claude":
@@ -281,13 +303,17 @@ function agentStartTail(
   readonly: boolean
 ): string[] {
   const args = readonly ? readonlyAgentArgs(kind) : [];
-  if (model && model !== "inherit" && model !== "auto") args.push("--model", model);
+  if (model && model !== "inherit" && model !== "auto")
+    args.push("--model", model);
   args.push(...effortAgentArgs(kind, effort));
   return args.length === 0 ? [] : ["--", ...args];
 }
 
 async function spawnHerdr(args: string[]): Promise<CommandResult> {
-  const proc = Bun.spawn(["herdr", ...args], { stdout: "pipe", stderr: "pipe" });
+  const proc = Bun.spawn(["herdr", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -298,12 +324,17 @@ async function spawnHerdr(args: string[]): Promise<CommandResult> {
 
 // A prompt body can run to kilobytes; the error names its size, not its text.
 function argSummary(args: string[]): string {
-  return args.map((arg) => (arg.length > LONG_ARG_CHARS ? `<${arg.length} chars>` : arg)).join(" ");
+  return args
+    .map((arg) => (arg.length > LONG_ARG_CHARS ? `<${arg.length} chars>` : arg))
+    .join(" ");
 }
 
 function herdrErrorCode(detail: string): string | undefined {
   try {
-    const error = asObject(asObject(JSON.parse(detail), "herdr error").error, "error");
+    const error = asObject(
+      asObject(JSON.parse(detail), "herdr error").error,
+      "error"
+    );
     return typeof error.code === "string" ? error.code : undefined;
   } catch {
     return undefined;
@@ -316,13 +347,17 @@ async function runHerdrCommand(
 ): Promise<CommandResult> {
   const result = await exec(args);
   if (result.exitCode !== 0) {
-    const detail = result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`;
+    const detail =
+      result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`;
     throw new HerdrError(argSummary(args), detail, herdrErrorCode(detail));
   }
   return result;
 }
 
-async function runHerdrJson(args: string[], exec: HerdrExec = spawnHerdr): Promise<unknown> {
+async function runHerdrJson(
+  args: string[],
+  exec: HerdrExec = spawnHerdr
+): Promise<unknown> {
   const result = await runHerdrCommand(args, exec);
   const text = result.stdout.trim();
   if (!text) return {};
@@ -336,14 +371,20 @@ async function runHerdrJson(args: string[], exec: HerdrExec = spawnHerdr): Promi
   }
 }
 
-async function runHerdrText(args: string[], exec: HerdrExec = spawnHerdr): Promise<string> {
+async function runHerdrText(
+  args: string[],
+  exec: HerdrExec = spawnHerdr
+): Promise<string> {
   const result = await runHerdrCommand(args, exec);
   return result.stdout.replace(/\s+$/, "");
 }
 
 // `pane split` reports the new pane as result.pane; `tab create` reports it as
 // result.root_pane. Everything downstream only needs the id.
-export function paneId(payload: unknown, placement: Placement = "split"): string {
+export function paneId(
+  payload: unknown,
+  placement: Placement = "split"
+): string {
   const key = placement === "tab" ? "root_pane" : "pane";
   const command = placement === "tab" ? "herdr tab create" : "herdr pane split";
   const root = asObject(payload, command);
@@ -371,7 +412,9 @@ function agentLocation(payload: unknown): { pane: string; kind: AgentKind } {
     throw new Error("herdr agent get returned no result.agent.pane_id");
   }
   if (agent.agent !== "claude" && agent.agent !== "codex") {
-    throw new Error(`herdr agent get returned an agent kind pstack cannot collect: ${String(agent.agent)}`);
+    throw new Error(
+      `herdr agent get returned an agent kind pstack cannot collect: ${String(agent.agent)}`
+    );
   }
   return { pane, kind: agent.agent };
 }
@@ -380,7 +423,10 @@ function agentLocation(payload: unknown): { pane: string; kind: AgentKind } {
 export function agentSessionId(payload: unknown): string | undefined {
   try {
     const root = asObject(payload, "herdr agent get");
-    const agent = asObject(asObject(root.result, "result").agent, "result.agent");
+    const agent = asObject(
+      asObject(root.result, "result").agent,
+      "result.agent"
+    );
     const session = agent.agent_session;
     if (typeof session !== "object" || session === null) return undefined;
     const value = (session as Record<string, unknown>).value;
@@ -393,12 +439,18 @@ export function agentSessionId(payload: unknown): string | undefined {
 // The prompt's first line, JSON-escaped as a transcript stores it. The read-only prefix
 // is skipped because every read-only worker shares it.
 export function promptNeedle(prompt: string): string {
-  const body = prompt.startsWith(READONLY_PREFIX) ? prompt.slice(READONLY_PREFIX.length) : prompt;
+  const body = prompt.startsWith(READONLY_PREFIX)
+    ? prompt.slice(READONLY_PREFIX.length)
+    : prompt;
   const firstLine = body.split("\n").find((line) => line.trim() !== "") ?? "";
   return JSON.stringify(firstLine.slice(0, EVIDENCE_NEEDLE_CHARS)).slice(1, -1);
 }
 
-function configHome(kind: AgentKind, env: NodeJS.ProcessEnv, home: string): string {
+function configHome(
+  kind: AgentKind,
+  env: NodeJS.ProcessEnv,
+  home: string
+): string {
   const { key, defaultDir } = CONFIG_HOMES[kind];
   const raw = env[key];
   return raw ? resolve(expandHome(raw, home)) : resolve(home, defaultDir);
@@ -422,7 +474,8 @@ function transcriptsSince(root: string, since: number): string[] {
         continue;
       }
       if (stats.isDirectory()) walk(path);
-      else if (entry.endsWith(".jsonl") && stats.mtimeMs >= since) found.push(path);
+      else if (entry.endsWith(".jsonl") && stats.mtimeMs >= since)
+        found.push(path);
     }
   };
   walk(root);
@@ -460,12 +513,16 @@ function resolvedPrompt(options: DispatchOptions): string {
   if (options.prompt && options.promptFile) {
     throw new Error("use either --prompt or --prompt-file, not both");
   }
-  if (options.promptFile) return readFileSync(resolve(options.promptFile), "utf8");
+  if (options.promptFile)
+    return readFileSync(resolve(options.promptFile), "utf8");
   if (options.prompt) return options.prompt;
   throw new Error("set --prompt or --prompt-file");
 }
 
-function defaultTimeout(config: RoutesConfig, timeout: number | undefined): number {
+function defaultTimeout(
+  config: RoutesConfig,
+  timeout: number | undefined
+): number {
   return (
     optionalNonNegativeInt(timeout, "--timeout") ??
     config.orchestration?.default_timeout_ms ??
@@ -473,15 +530,24 @@ function defaultTimeout(config: RoutesConfig, timeout: number | undefined): numb
   );
 }
 
-function depth(config: RoutesConfig, env: NodeJS.ProcessEnv = process.env): {
+function depth(
+  config: RoutesConfig,
+  env: NodeJS.ProcessEnv = process.env
+): {
   current: number;
   next: number;
   max: number;
 } {
-  const current = parseNonNegativeInt(env.PSTACK_HERDR_DEPTH, 0, "PSTACK_HERDR_DEPTH");
+  const current = parseNonNegativeInt(
+    env.PSTACK_HERDR_DEPTH,
+    0,
+    "PSTACK_HERDR_DEPTH"
+  );
   const max = config.orchestration?.max_depth ?? 3;
   if (current >= max) {
-    throw new Error(`Herdr delegation depth ${current} reached configured max_depth ${max}`);
+    throw new Error(
+      `Herdr delegation depth ${current} reached configured max_depth ${max}`
+    );
   }
   return { current, next: current + 1, max };
 }
@@ -493,13 +559,17 @@ function chooseProfile(
 ): { name: string; profile: Profile } {
   if (options.profile) {
     const profile = config.profiles?.[options.profile];
-    if (!profile) throw new Error(`unknown Herdr route profile: ${options.profile}`);
+    if (!profile)
+      throw new Error(`unknown Herdr route profile: ${options.profile}`);
     return { name: options.profile, profile };
   }
   const routedName = selectProfileName(config, options.role, options.name);
   if (routedName) {
     const profile = config.profiles?.[routedName];
-    if (!profile) throw new Error(`role ${options.role} references unknown profile ${routedName}`);
+    if (!profile)
+      throw new Error(
+        `role ${options.role} references unknown profile ${routedName}`
+      );
     return { name: routedName, profile };
   }
   const kind = options.kind ?? inferParentKind(env);
@@ -508,7 +578,10 @@ function chooseProfile(
       "no route matched and parent CLI could not be inferred; set --kind claude|codex or PSTACK_HERDR_PARENT_KIND"
     );
   }
-  return { name: "parent", profile: { kind, model: options.model ?? "inherit", env: {} } };
+  return {
+    name: "parent",
+    profile: { kind, model: options.model ?? "inherit", env: {} },
+  };
 }
 
 // A background tab keeps the worker off the caller's screen; a split puts it
@@ -520,7 +593,16 @@ export function placementArgs(
 ): string[] {
   switch (options.placement) {
     case "tab":
-      return ["tab", "create", "--cwd", cwd, "--label", options.name, "--no-focus", ...env];
+      return [
+        "tab",
+        "create",
+        "--cwd",
+        cwd,
+        "--label",
+        options.name,
+        "--no-focus",
+        ...env,
+      ];
     case "split":
       return [
         "pane",
@@ -545,8 +627,10 @@ export function planDispatch(
   options: DispatchOptions,
   env: NodeJS.ProcessEnv = process.env
 ): DispatchPlan {
-  if (env.HERDR_ENV !== "1") throw new Error("herdr-dispatch requires HERDR_ENV=1");
-  if (!AGENT_NAME.test(options.name)) throw new Error("--name must match [a-z][a-z0-9_-]{0,31}");
+  if (env.HERDR_ENV !== "1")
+    throw new Error("herdr-dispatch requires HERDR_ENV=1");
+  if (!AGENT_NAME.test(options.name))
+    throw new Error("--name must match [a-z][a-z0-9_-]{0,31}");
   const config = loadRoutes(options.routes, env);
   const chosen = chooseProfile(config, options, env);
   const nesting = depth(config, env);
@@ -633,7 +717,15 @@ async function closePane(pane: string, exec: HerdrExec): Promise<void> {
 async function visibleScreen(name: string, exec: HerdrExec): Promise<string> {
   try {
     return await runHerdrText(
-      ["agent", "read", name, "--source", "visible", "--lines", String(SCREEN_LINES)],
+      [
+        "agent",
+        "read",
+        name,
+        "--source",
+        "visible",
+        "--lines",
+        String(SCREEN_LINES),
+      ],
       exec
     );
   } catch {
@@ -641,10 +733,24 @@ async function visibleScreen(name: string, exec: HerdrExec): Promise<string> {
   }
 }
 
-async function settleBeforePrompt(name: string, timeout: number, exec: HerdrExec): Promise<void> {
+async function settleBeforePrompt(
+  name: string,
+  timeout: number,
+  exec: HerdrExec
+): Promise<void> {
   try {
     await runHerdrCommand(
-      ["agent", "wait", name, "--until", "idle", "--until", "blocked", "--timeout", String(timeout)],
+      [
+        "agent",
+        "wait",
+        name,
+        "--until",
+        "idle",
+        "--until",
+        "blocked",
+        "--timeout",
+        String(timeout),
+      ],
       exec
     );
   } catch {
@@ -652,11 +758,18 @@ async function settleBeforePrompt(name: string, timeout: number, exec: HerdrExec
   }
 }
 
-async function leftIdle(name: string, windowMs: number, exec: HerdrExec): Promise<boolean> {
+async function leftIdle(
+  name: string,
+  windowMs: number,
+  exec: HerdrExec
+): Promise<boolean> {
   const deadline = Date.now() + windowMs;
   for (;;) {
-    const status = agentStatus(await runHerdrJson(["agent", "get", name], exec));
-    if (status === "working" || status === "blocked" || status === "done") return true;
+    const status = agentStatus(
+      await runHerdrJson(["agent", "get", name], exec)
+    );
+    if (status === "working" || status === "blocked" || status === "done")
+      return true;
     if (Date.now() >= deadline) return false;
     await sleep(DELIVERY_POLL_MS);
   }
@@ -685,14 +798,24 @@ function leavesPaneOpen(error: unknown): boolean {
 function withScreen(error: unknown, screen: string): Error {
   const base = error instanceof Error ? error : new Error(String(error));
   if (!screen.trim()) return base;
-  return new Error(`${base.message}\nworker screen before the pane closed:\n${screen}`, {
-    cause: base,
-  });
+  return new Error(
+    `${base.message}\nworker screen before the pane closed:\n${screen}`,
+    {
+      cause: base,
+    }
+  );
 }
 
-async function awaitSettled(name: string, timeout: number, exec: HerdrExec): Promise<unknown> {
+async function awaitSettled(
+  name: string,
+  timeout: number,
+  exec: HerdrExec
+): Promise<unknown> {
   try {
-    await runHerdrCommand(["agent", "wait", name, "--timeout", String(timeout)], exec);
+    await runHerdrCommand(
+      ["agent", "wait", name, "--timeout", String(timeout)],
+      exec
+    );
   } catch (error) {
     if (!isWaitTimeout(error)) throw error;
   }
@@ -711,7 +834,15 @@ async function finish(
     status === "working"
       ? await visibleScreen(name, exec)
       : await runHerdrText(
-          ["agent", "read", name, "--source", "recent-unwrapped", "--lines", "240"],
+          [
+            "agent",
+            "read",
+            name,
+            "--source",
+            "recent-unwrapped",
+            "--lines",
+            "240",
+          ],
           exec
         );
   const paneClosed = (status === "done" || status === "idle") && !keepPane;
@@ -727,7 +858,10 @@ export async function dispatch(
   onPane: (pane: string) => void = () => {}
 ): Promise<DispatchResult> {
   const plan = planDispatch(options, env);
-  const pane = paneId(await runHerdrJson(plan.placeArgs, exec), options.placement);
+  const pane = paneId(
+    await runHerdrJson(plan.placeArgs, exec),
+    options.placement
+  );
   onPane(pane);
   let promptedAt = Date.now();
   try {
@@ -771,7 +905,10 @@ export async function dispatch(
       );
     }
   }
-  return { ...handle, ...(await finish(options.name, pane, status, options.keepPane, exec)) };
+  return {
+    ...handle,
+    ...(await finish(options.name, pane, status, options.keepPane, exec)),
+  };
 }
 
 // A worker handed back as `working` already ran its prompt, so it needs no transcript check.
@@ -781,9 +918,15 @@ export async function collect(
   exec: HerdrExec = spawnHerdr,
   onPane: (pane: string) => void = () => {}
 ): Promise<CollectResult> {
-  if (env.HERDR_ENV !== "1") throw new Error("herdr-dispatch requires HERDR_ENV=1");
-  const timeout = defaultTimeout(loadRoutes(options.routes, env), options.timeout);
-  const { pane, kind } = agentLocation(await runHerdrJson(["agent", "get", options.name], exec));
+  if (env.HERDR_ENV !== "1")
+    throw new Error("herdr-dispatch requires HERDR_ENV=1");
+  const timeout = defaultTimeout(
+    loadRoutes(options.routes, env),
+    options.timeout
+  );
+  const { pane, kind } = agentLocation(
+    await runHerdrJson(["agent", "get", options.name], exec)
+  );
   onPane(pane);
   const status = agentStatus(await awaitSettled(options.name, timeout, exec));
   return {
@@ -821,15 +964,27 @@ async function main(): Promise<void> {
     .option("--profile <name>", "force a configured route profile")
     .option("--kind <kind>", "fallback agent kind, claude or codex")
     .option("--model <slug>", "override model passed to the worker CLI")
-    .option("--effort <level>", "override reasoning effort passed to the worker CLI")
+    .option(
+      "--effort <level>",
+      "override reasoning effort passed to the worker CLI"
+    )
     .option("--wait", "wait for settled worker state and read output", false)
-    .option("--keep-pane", "keep a completed worker pane open after --wait or --collect", false)
-    .option("--collect", "wait for, read, and close a worker that --wait left working", false)
+    .option(
+      "--keep-pane",
+      "keep a completed worker pane open after --wait or --collect",
+      false
+    )
+    .option(
+      "--collect",
+      "wait for, read, and close a worker that --wait left working",
+      false
+    )
     .option(
       "--timeout <ms>",
       "timeout in milliseconds for agent start, --wait, and --collect",
       (value: string) => {
-        if (!/^\d+$/.test(value)) throw new Error("--timeout must be a non-negative integer");
+        if (!/^\d+$/.test(value))
+          throw new Error("--timeout must be a non-negative integer");
         return Number(value);
       }
     )
@@ -850,7 +1005,8 @@ async function main(): Promise<void> {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
-  if (!options.role) throw new Error("--role is required unless --collect is set");
+  if (!options.role)
+    throw new Error("--role is required unless --collect is set");
   if (options.kind && options.kind !== "claude" && options.kind !== "codex") {
     throw new Error("--kind must be claude or codex");
   }
@@ -860,14 +1016,22 @@ async function main(): Promise<void> {
   if (options.placement !== "tab" && options.placement !== "split") {
     throw new Error("--placement must be tab or split");
   }
-  const result = await dispatch(options, process.env, spawnHerdr, turnEvidence, own);
+  const result = await dispatch(
+    options,
+    process.env,
+    spawnHerdr,
+    turnEvidence,
+    own
+  );
   own(undefined);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
 if (import.meta.main) {
   main().catch((error) => {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(
+      `${error instanceof Error ? error.message : String(error)}\n`
+    );
     process.exit(1);
   });
 }

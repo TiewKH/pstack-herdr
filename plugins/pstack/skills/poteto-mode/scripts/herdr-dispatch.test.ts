@@ -1,5 +1,11 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadRoutes, parseRoutes, type RoutesConfig } from "./herdr-config.ts";
@@ -44,7 +50,9 @@ const config: RoutesConfig = {
   },
 };
 
-const emptyRoutesDir = mkdtempSync(join(tmpdir(), "pstack-herdr-empty-routes-"));
+const emptyRoutesDir = mkdtempSync(
+  join(tmpdir(), "pstack-herdr-empty-routes-")
+);
 const emptyRoutes = join(emptyRoutesDir, "routes.json");
 writeFileSync(emptyRoutes, "{}\n");
 afterAll(() => {
@@ -72,7 +80,8 @@ describe("herdr-dispatch routing", () => {
 
   test("spread roles deterministically select from their pool", () => {
     const selected = selectProfileName(config, "explorer", "explorer-a");
-    if (selected === undefined) throw new Error("expected configured explorer profile");
+    if (selected === undefined)
+      throw new Error("expected configured explorer profile");
     expect(["claude-a", "codex-a"]).toContain(selected);
   });
 
@@ -110,7 +119,9 @@ roles:
       parseRoutes(
         JSON.stringify({
           profiles: { "claude-a": { kind: "claude" } },
-          roles: { judgment: { profiles: ["claude-a"], strategy: "strongest-first" } },
+          roles: {
+            judgment: { profiles: ["claude-a"], strategy: "strongest-first" },
+          },
         })
       )
     ).toThrow(/must be spread or first/);
@@ -146,9 +157,14 @@ describe("herdr-dispatch contracts", () => {
   });
 
   test("readonly args disable writes without Ask mode", () => {
-    expect(readonlyAgentArgs("claude")).toEqual(["--disallowedTools", "Write,Edit"]);
+    expect(readonlyAgentArgs("claude")).toEqual([
+      "--disallowedTools",
+      "Write,Edit",
+    ]);
     expect(readonlyAgentArgs("codex")).toEqual(["--sandbox", "read-only"]);
-    expect(applyReadonlyPrompt("do the work", true).startsWith("Read-only worker.")).toBe(true);
+    expect(
+      applyReadonlyPrompt("do the work", true).startsWith("Read-only worker.")
+    ).toBe(true);
     expect(applyReadonlyPrompt("do the work", false)).toBe("do the work");
   });
 
@@ -162,17 +178,23 @@ describe("herdr-dispatch contracts", () => {
   });
 
   test("env flags keep key and value as one argv pair", () => {
-    expect(envFlags({ CLAUDE_CONFIG_DIR: "~/.claude-a", PSTACK_HERDR_DEPTH: "2" })).toEqual([
+    expect(
+      envFlags({ CLAUDE_CONFIG_DIR: "~/.claude-a", PSTACK_HERDR_DEPTH: "2" })
+    ).toEqual([
       "--env",
       `CLAUDE_CONFIG_DIR=${resolve(homedir(), ".claude-a")}`,
       "--env",
       "PSTACK_HERDR_DEPTH=2",
     ]);
-    expect(() => envFlags({ "BAD-KEY": "1" })).toThrow(/invalid environment variable name/);
+    expect(() => envFlags({ "BAD-KEY": "1" })).toThrow(
+      /invalid environment variable name/
+    );
   });
 
   test("inferParentKind prefers an explicit child kind", () => {
-    expect(inferParentKind({ PSTACK_HERDR_PARENT_KIND: "codex", CLAUDECODE: "1" })).toBe("codex");
+    expect(
+      inferParentKind({ PSTACK_HERDR_PARENT_KIND: "codex", CLAUDECODE: "1" })
+    ).toBe("codex");
     expect(inferParentKind({ CLAUDECODE: "1" })).toBe("claude");
   });
 
@@ -181,9 +203,9 @@ describe("herdr-dispatch contracts", () => {
   });
 
   test("dispatch refuses names that Herdr will reject", async () => {
-    await expect(dispatch({ ...options, name: "Bad Name" }, { HERDR_ENV: "1" })).rejects.toThrow(
-      /--name must match/
-    );
+    await expect(
+      dispatch({ ...options, name: "Bad Name" }, { HERDR_ENV: "1" })
+    ).rejects.toThrow(/--name must match/);
   });
 
   test("dispatch refuses depth that reached max_depth before contacting Herdr", async () => {
@@ -194,9 +216,9 @@ describe("herdr-dispatch contracts", () => {
 
   test("dispatch refuses a negative timeout before contacting Herdr", async () => {
     const { calls, exec } = scriptedExec({});
-    await expect(dispatch({ ...options, timeout: -1 }, herdrEnv, exec)).rejects.toThrow(
-      /--timeout must be a non-negative integer/
-    );
+    await expect(
+      dispatch({ ...options, timeout: -1 }, herdrEnv, exec)
+    ).rejects.toThrow(/--timeout must be a non-negative integer/);
     expect(calls).toEqual([]);
   });
 });
@@ -211,7 +233,9 @@ const tabPayload = {
 };
 const getPayload = {
   id: "cli:agent:get",
-  result: { agent: { agent: "claude", agent_status: "idle", name: "ci-explorer" } },
+  result: {
+    agent: { agent: "claude", agent_status: "idle", name: "ci-explorer" },
+  },
 };
 
 function jsonResult(payload: unknown): CommandResult {
@@ -239,7 +263,8 @@ function scriptedExec(
     exec: async (args) => {
       calls.push(args);
       const reply = replies[commandKey(args)];
-      if (reply === undefined) throw new Error(`unexpected herdr ${args.join(" ")}`);
+      if (reply === undefined)
+        throw new Error(`unexpected herdr ${args.join(" ")}`);
       return typeof reply === "function" ? reply(args) : reply;
     },
   };
@@ -256,14 +281,20 @@ const readOk = textResult("worker output\n");
 describe("herdr JSON decoders", () => {
   test("paneId requires result.pane.pane_id", () => {
     expect(paneId(splitPayload)).toBe("w1:p2");
-    expect(() => paneId({ result: { pane: {} } })).toThrow(/result.pane.pane_id/);
-    expect(() => paneId({ result: {} })).toThrow(/result.pane must be an object/);
+    expect(() => paneId({ result: { pane: {} } })).toThrow(
+      /result.pane.pane_id/
+    );
+    expect(() => paneId({ result: {} })).toThrow(
+      /result.pane must be an object/
+    );
   });
 
   test("paneId reads the tab root pane when placing in a tab", () => {
     expect(paneId(tabPayload, "tab")).toBe("w1:p9");
     expect(() => paneId(tabPayload)).toThrow(/result.pane must be an object/);
-    expect(() => paneId(splitPayload, "tab")).toThrow(/result.root_pane must be an object/);
+    expect(() => paneId(splitPayload, "tab")).toThrow(
+      /result.root_pane must be an object/
+    );
   });
 
   test("parseAgentStatus accepts only Herdr's five states", () => {
@@ -272,8 +303,12 @@ describe("herdr JSON decoders", () => {
     expect(parseAgentStatus("blocked")).toBe("blocked");
     expect(parseAgentStatus("done")).toBe("done");
     expect(parseAgentStatus("unknown")).toBe("unknown");
-    expect(() => parseAgentStatus("ready")).toThrow(/invalid result.agent.agent_status/);
-    expect(() => parseAgentStatus(undefined)).toThrow(/invalid result.agent.agent_status/);
+    expect(() => parseAgentStatus("ready")).toThrow(
+      /invalid result.agent.agent_status/
+    );
+    expect(() => parseAgentStatus(undefined)).toThrow(
+      /invalid result.agent.agent_status/
+    );
   });
 
   test("agentStatus requires result.agent.agent_status and does not guess", () => {
@@ -294,7 +329,9 @@ const waitOk = jsonResult({ id: "cli:agent:wait", result: {} });
 const getStatus = (status: string): CommandResult =>
   jsonResult({
     id: "cli:agent:get",
-    result: { agent: { agent: "claude", agent_status: status, name: "ci-explorer" } },
+    result: {
+      agent: { agent: "claude", agent_status: status, name: "ci-explorer" },
+    },
   });
 // The first `agent get` answers the delivery poll; later ones answer the settled read.
 const getAfterPrompt = (...statuses: string[]) => {
@@ -314,7 +351,10 @@ const noDelay = { ...herdrEnv, PSTACK_HERDR_DELIVERY_WINDOW_MS: "0" };
 
 describe("herdr-dispatch Herdr sequence", () => {
   test("passes the timeout and closes a completed worker after reading its output", async () => {
-    const { calls, exec } = scriptedExec({ ...happyPath(), "pane close": closeOk });
+    const { calls, exec } = scriptedExec({
+      ...happyPath(),
+      "pane close": closeOk,
+    });
     const result = await dispatch(
       { ...options, wait: true, timeout: 45000, readonly: false },
       herdrEnv,
@@ -338,10 +378,15 @@ describe("herdr-dispatch Herdr sequence", () => {
     expect(start[timeoutAt + 1]).toBe("45000");
     expect(dash === -1 || timeoutAt < dash).toBe(true);
     expect(prompt).not.toContain("--wait");
-    expect(calls.find((args) => commandKey(args) === "agent wait" && !args.includes("--until"))).toEqual(
-      ["agent", "wait", "ci-explorer", "--timeout", "45000"]
-    );
-    expect(calls.map(commandKey).slice(-2)).toEqual(["agent read", "pane close"]);
+    expect(
+      calls.find(
+        (args) => commandKey(args) === "agent wait" && !args.includes("--until")
+      )
+    ).toEqual(["agent", "wait", "ci-explorer", "--timeout", "45000"]);
+    expect(calls.map(commandKey).slice(-2)).toEqual([
+      "agent read",
+      "pane close",
+    ]);
   });
 
   test("--keep-pane retains a completed worker for inspection", async () => {
@@ -352,7 +397,11 @@ describe("herdr-dispatch Herdr sequence", () => {
       exec,
       () => true
     );
-    expect(result).toMatchObject({ status: "idle", paneClosed: false, output: "worker output" });
+    expect(result).toMatchObject({
+      status: "idle",
+      paneClosed: false,
+      output: "worker output",
+    });
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
   });
 
@@ -389,17 +438,27 @@ describe("herdr-dispatch Herdr sequence", () => {
   });
 
   test("a worker that finishes inside the delivery window is prompted once and kept", async () => {
-    const { calls, exec } = scriptedExec({ ...happyPath(), "agent get": getStatus("done") });
+    const { calls, exec } = scriptedExec({
+      ...happyPath(),
+      "agent get": getStatus("done"),
+    });
     await dispatch(options, herdrEnv, exec);
-    expect(calls.filter((args) => commandKey(args) === "agent prompt")).toHaveLength(1);
+    expect(
+      calls.filter((args) => commandKey(args) === "agent prompt")
+    ).toHaveLength(1);
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
   });
 
   test("a working or blocked worker also proves delivery", async () => {
     for (const status of ["working", "blocked"]) {
-      const { calls, exec } = scriptedExec({ ...happyPath(), "agent get": getStatus(status) });
+      const { calls, exec } = scriptedExec({
+        ...happyPath(),
+        "agent get": getStatus(status),
+      });
       await dispatch(options, herdrEnv, exec);
-      expect(calls.filter((args) => commandKey(args) === "agent prompt")).toHaveLength(1);
+      expect(
+        calls.filter((args) => commandKey(args) === "agent prompt")
+      ).toHaveLength(1);
     }
   });
 
@@ -410,9 +469,13 @@ describe("herdr-dispatch Herdr sequence", () => {
       "agent read": textResult("❯ Read-only worker. Do not write files\n"),
       "pane close": closeOk,
     });
-    const error = await dispatch(options, noDelay, exec).catch((e: unknown) => e);
+    const error = await dispatch(options, noDelay, exec).catch(
+      (e: unknown) => e
+    );
     expect((error as Error).message).toMatch(/not delivered after 2 attempts/);
-    expect(calls.filter((args) => commandKey(args) === "agent prompt")).toHaveLength(2);
+    expect(
+      calls.filter((args) => commandKey(args) === "agent prompt")
+    ).toHaveLength(2);
     expect(calls.map(commandKey).at(-1)).toBe("pane close");
   });
 
@@ -423,10 +486,14 @@ describe("herdr-dispatch Herdr sequence", () => {
       "agent read": welcomeScreen,
       "pane close": closeOk,
     });
-    const error = await dispatch(options, noDelay, exec).catch((e: unknown) => e);
+    const error = await dispatch(options, noDelay, exec).catch(
+      (e: unknown) => e
+    );
     expect((error as Error).message).toMatch(/not delivered after 2 attempts/);
     expect((error as Error).message).toMatch(/Welcome to Claude Code/);
-    expect(calls.filter((args) => commandKey(args) === "agent prompt")).toHaveLength(2);
+    expect(
+      calls.filter((args) => commandKey(args) === "agent prompt")
+    ).toHaveLength(2);
     expect(calls.map(commandKey).at(-1)).toBe("pane close");
   });
 
@@ -442,8 +509,15 @@ describe("herdr-dispatch Herdr sequence", () => {
   });
 
   test("tab placement keeps the worker off the caller's screen", async () => {
-    const { calls, exec } = scriptedExec({ ...happyPath(), "tab create": jsonResult(tabPayload) });
-    const result = await dispatch({ ...options, placement: "tab" }, herdrEnv, exec);
+    const { calls, exec } = scriptedExec({
+      ...happyPath(),
+      "tab create": jsonResult(tabPayload),
+    });
+    const result = await dispatch(
+      { ...options, placement: "tab" },
+      herdrEnv,
+      exec
+    );
     expect(result.pane).toBe("w1:p9");
     const create = calls.find((args) => commandKey(args) === "tab create");
     if (!create) throw new Error("expected tab create");
@@ -454,11 +528,29 @@ describe("herdr-dispatch Herdr sequence", () => {
 
   test("placement chooses between a background tab and a visible split", () => {
     const env = ["--env", "K=v"];
-    expect(placementArgs({ placement: "tab", direction: "right", name: "w" }, "/repo", env)).toEqual(
-      ["tab", "create", "--cwd", "/repo", "--label", "w", "--no-focus", "--env", "K=v"]
-    );
     expect(
-      placementArgs({ placement: "split", direction: "down", name: "w" }, "/repo", env)
+      placementArgs(
+        { placement: "tab", direction: "right", name: "w" },
+        "/repo",
+        env
+      )
+    ).toEqual([
+      "tab",
+      "create",
+      "--cwd",
+      "/repo",
+      "--label",
+      "w",
+      "--no-focus",
+      "--env",
+      "K=v",
+    ]);
+    expect(
+      placementArgs(
+        { placement: "split", direction: "down", name: "w" },
+        "/repo",
+        env
+      )
     ).toEqual([
       "pane",
       "split",
@@ -500,7 +592,9 @@ describe("herdr-dispatch Herdr sequence", () => {
 
   test("only a pane that is not yet a shell is worth retrying", () => {
     expect(isPaneNotReady('{"error":{"code":"agent_pane_busy"}}')).toBe(true);
-    expect(isPaneNotReady("agent target pane w1:p2 is not an available shell")).toBe(true);
+    expect(
+      isPaneNotReady("agent target pane w1:p2 is not an available shell")
+    ).toBe(true);
     expect(isPaneNotReady("agent_not_ready")).toBe(false);
     expect(isPaneNotReady("agent_prompt_stalled")).toBe(false);
   });
@@ -511,8 +605,15 @@ describe("herdr-dispatch Herdr sequence", () => {
       "agent start": failed("agent_not_ready"),
       "pane close": closeOk,
     });
-    await expect(dispatch(options, herdrEnv, exec)).rejects.toThrow(/agent_not_ready/);
-    expect(calls.map(commandKey)).toEqual(["pane split", "agent start", "agent read", "pane close"]);
+    await expect(dispatch(options, herdrEnv, exec)).rejects.toThrow(
+      /agent_not_ready/
+    );
+    expect(calls.map(commandKey)).toEqual([
+      "pane split",
+      "agent start",
+      "agent read",
+      "pane close",
+    ]);
     expect(calls[3]).toEqual(["pane", "close", "w1:p2"]);
   });
 
@@ -520,10 +621,14 @@ describe("herdr-dispatch Herdr sequence", () => {
     const { calls, exec } = scriptedExec({
       ...happyPath(),
       "agent prompt": failed("agent_blocked"),
-      "agent read": textResult("Choose the text style that looks best with your terminal\n"),
+      "agent read": textResult(
+        "Choose the text style that looks best with your terminal\n"
+      ),
       "pane close": closeOk,
     });
-    const error = await dispatch(options, herdrEnv, exec).catch((e: unknown) => e);
+    const error = await dispatch(options, herdrEnv, exec).catch(
+      (e: unknown) => e
+    );
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toMatch(/agent_blocked/);
     expect((error as Error).message).toMatch(/Choose the text style/);
@@ -535,7 +640,15 @@ describe("herdr-dispatch Herdr sequence", () => {
       "agent read",
       "pane close",
     ]);
-    expect(calls[4]).toEqual(["agent", "read", "ci-explorer", "--source", "visible", "--lines", "24"]);
+    expect(calls[4]).toEqual([
+      "agent",
+      "read",
+      "ci-explorer",
+      "--source",
+      "visible",
+      "--lines",
+      "24",
+    ]);
   });
 
   test("a rejected prompt's error names the prompt size, not its text", async () => {
@@ -549,7 +662,9 @@ describe("herdr-dispatch Herdr sequence", () => {
       herdrEnv,
       exec
     ).catch((e: unknown) => e);
-    expect((error as Error).message).toMatch(/herdr agent prompt ci-explorer <2000 chars> failed/);
+    expect((error as Error).message).toMatch(
+      /herdr agent prompt ci-explorer <2000 chars> failed/
+    );
     expect((error as Error).message).not.toContain("xxxxxxxxxx");
   });
 
@@ -560,7 +675,9 @@ describe("herdr-dispatch Herdr sequence", () => {
       "agent read": failed("agent_not_found"),
       "pane close": closeOk,
     });
-    await expect(dispatch(options, herdrEnv, exec)).rejects.toThrow(/agent_blocked/);
+    await expect(dispatch(options, herdrEnv, exec)).rejects.toThrow(
+      /agent_blocked/
+    );
     expect(calls.map(commandKey).at(-1)).toBe("pane close");
   });
 
@@ -572,11 +689,15 @@ describe("herdr-dispatch Herdr sequence", () => {
         waits += 1;
         return args.includes("--until")
           ? waitOk
-          : failed('{"error":{"code":"timeout","message":"timed out waiting for agent status"},"id":"cli:agent:wait"}');
+          : failed(
+              '{"error":{"code":"timeout","message":"timed out waiting for agent status"},"id":"cli:agent:wait"}'
+            );
       },
       "agent get": getStatus("working"),
       "agent read": (args) =>
-        args.includes("visible") ? textResult("Contemplating...\n") : failed("agent_not_idle"),
+        args.includes("visible")
+          ? textResult("Contemplating...\n")
+          : failed("agent_not_idle"),
     });
     const result = await dispatch({ ...options, wait: true }, herdrEnv, exec);
     expect(waits).toBe(2);
@@ -597,12 +718,17 @@ describe("herdr-dispatch Herdr sequence", () => {
       });
       const result = await dispatch({ ...options, wait: true }, herdrEnv, exec);
       expect(result).toMatchObject({ status, paneClosed: false });
-      expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+      expect(calls.some((args) => commandKey(args) === "pane close")).toBe(
+        false
+      );
     }
   });
 
   test("reports a completed-worker cleanup failure", async () => {
-    const { exec } = scriptedExec({ ...happyPath(), "pane close": failed("close failed") });
+    const { exec } = scriptedExec({
+      ...happyPath(),
+      "pane close": failed("close failed"),
+    });
     await expect(
       dispatch({ ...options, wait: true }, herdrEnv, exec, () => true)
     ).rejects.toThrow(/close failed/);
@@ -613,11 +739,15 @@ describe("herdr-dispatch Herdr sequence", () => {
       ...happyPath(),
       "agent get": getAfterPrompt("done", "done"),
       "agent read": (args) =>
-        args.includes("visible") ? textResult("OpenAI Codex\n\n› Ask Codex to do anything\n") : readOk,
+        args.includes("visible")
+          ? textResult("OpenAI Codex\n\n› Ask Codex to do anything\n")
+          : readOk,
     });
     await expect(
       dispatch({ ...options, wait: true }, herdrEnv, exec, () => false)
-    ).rejects.toThrow(/reports done, but no claude transcript[\s\S]*never ran it[\s\S]*Ask Codex/);
+    ).rejects.toThrow(
+      /reports done, but no claude transcript[\s\S]*never ran it[\s\S]*Ask Codex/
+    );
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(true);
   });
 
@@ -643,10 +773,15 @@ describe("herdr-dispatch Herdr sequence", () => {
       "pane close": closeOk,
     });
     const before = Date.now();
-    const result = await dispatch({ ...options, wait: true }, herdrEnv, exec, (query) => {
-      seen.push(query);
-      return true;
-    });
+    const result = await dispatch(
+      { ...options, wait: true },
+      herdrEnv,
+      exec,
+      (query) => {
+        seen.push(query);
+        return true;
+      }
+    );
     expect(result).toMatchObject({ status: "idle", paneClosed: true });
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ kind: "claude", sessionId: "abc-123" });
@@ -662,11 +797,18 @@ describe("herdr-dispatch Herdr sequence", () => {
       "agent wait": (args) =>
         args.includes("--until")
           ? waitOk
-          : failed('{"error":{"code":"timeout","message":"timed out"},"id":"cli:agent:wait"}'),
+          : failed(
+              '{"error":{"code":"timeout","message":"timed out"},"id":"cli:agent:wait"}'
+            ),
       "agent get": getStatus("working"),
       "agent read": textResult("Contemplating...\n"),
     });
-    const result = await dispatch({ ...options, wait: true }, herdrEnv, exec, () => false);
+    const result = await dispatch(
+      { ...options, wait: true },
+      herdrEnv,
+      exec,
+      () => false
+    );
     expect(result).toMatchObject({ status: "working" });
   });
 
@@ -676,11 +818,13 @@ describe("herdr-dispatch Herdr sequence", () => {
       "agent wait": (args) =>
         args.includes("--until")
           ? waitOk
-          : failed('{"error":{"code":"agent_not_found","message":"gone"},"id":"cli:agent:wait"}'),
+          : failed(
+              '{"error":{"code":"agent_not_found","message":"gone"},"id":"cli:agent:wait"}'
+            ),
     });
-    await expect(dispatch({ ...options, wait: true }, herdrEnv, exec)).rejects.toThrow(
-      /agent_not_found/
-    );
+    await expect(
+      dispatch({ ...options, wait: true }, herdrEnv, exec)
+    ).rejects.toThrow(/agent_not_found/);
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
   });
 
@@ -689,9 +833,9 @@ describe("herdr-dispatch Herdr sequence", () => {
       ...happyPath(),
       "agent get": failed("agent_not_found"),
     });
-    await expect(dispatch({ ...options, wait: true }, herdrEnv, exec)).rejects.toThrow(
-      /agent_not_found/
-    );
+    await expect(
+      dispatch({ ...options, wait: true }, herdrEnv, exec)
+    ).rejects.toThrow(/agent_not_found/);
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
   });
 
@@ -704,7 +848,13 @@ describe("herdr-dispatch Herdr sequence", () => {
         return startOk;
       },
     });
-    await dispatch(options, herdrEnv, exec, () => true, (pane) => order.push(`pane ${pane}`));
+    await dispatch(
+      options,
+      herdrEnv,
+      exec,
+      () => true,
+      (pane) => order.push(`pane ${pane}`)
+    );
     expect(order).toEqual(["pane w1:p2", "agent start"]);
   });
 });
@@ -713,10 +863,20 @@ const codexGet = (status: string): CommandResult =>
   jsonResult({
     id: "cli:agent:get",
     result: {
-      agent: { agent: "codex", agent_status: status, name: "ci-review", pane_id: "w1:p7" },
+      agent: {
+        agent: "codex",
+        agent_status: status,
+        name: "ci-review",
+        pane_id: "w1:p7",
+      },
     },
   });
-const collectOptions = { name: "ci-review", keepPane: false, timeout: 60000, routes: emptyRoutes };
+const collectOptions = {
+  name: "ci-review",
+  keepPane: false,
+  timeout: 60000,
+  routes: emptyRoutes,
+};
 
 describe("herdr-dispatch collect", () => {
   test("a handed-off worker that finishes is read, then its pane is closed", async () => {
@@ -737,18 +897,30 @@ describe("herdr-dispatch collect", () => {
       paneClosed: true,
       output: "worker output",
     });
-    expect(calls).toContainEqual(["agent", "wait", "ci-review", "--timeout", "60000"]);
+    expect(calls).toContainEqual([
+      "agent",
+      "wait",
+      "ci-review",
+      "--timeout",
+      "60000",
+    ]);
     expect(calls.at(-1)).toEqual(["pane", "close", "w1:p7"]);
   });
 
   test("a worker still running when the budget ends stays open", async () => {
     const { calls, exec } = scriptedExec({
       "agent get": codexGet("working"),
-      "agent wait": failed('{"error":{"code":"timeout","message":"timed out"},"id":"cli:agent:wait"}'),
+      "agent wait": failed(
+        '{"error":{"code":"timeout","message":"timed out"},"id":"cli:agent:wait"}'
+      ),
       "agent read": textResult("Exploring...\n"),
     });
     const result = await collect(collectOptions, herdrEnv, exec);
-    expect(result).toMatchObject({ status: "working", paneClosed: false, output: "Exploring..." });
+    expect(result).toMatchObject({
+      status: "working",
+      paneClosed: false,
+      output: "Exploring...",
+    });
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
   });
 
@@ -758,7 +930,11 @@ describe("herdr-dispatch collect", () => {
       "agent wait": waitOk,
       "agent read": readOk,
     });
-    const result = await collect({ ...collectOptions, keepPane: true }, herdrEnv, exec);
+    const result = await collect(
+      { ...collectOptions, keepPane: true },
+      herdrEnv,
+      exec
+    );
     expect(result).toMatchObject({ status: "done", paneClosed: false });
     expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
   });
@@ -774,24 +950,44 @@ describe("herdr-dispatch collect", () => {
       "agent read": readOk,
       "pane close": closeOk,
     });
-    await collect(collectOptions, herdrEnv, exec, (pane) => order.push(`pane ${pane}`));
+    await collect(collectOptions, herdrEnv, exec, (pane) =>
+      order.push(`pane ${pane}`)
+    );
     expect(order).toEqual(["pane w1:p7", "agent wait"]);
   });
 
   test("collect refuses to run outside Herdr", async () => {
     const { calls, exec } = scriptedExec({});
-    await expect(collect(collectOptions, {}, exec)).rejects.toThrow(/HERDR_ENV=1/);
+    await expect(collect(collectOptions, {}, exec)).rejects.toThrow(
+      /HERDR_ENV=1/
+    );
     expect(calls).toEqual([]);
   });
 });
 
 describe("herdr-dispatch worker environment", () => {
   test("a config home equal to the CLI default is not passed to the worker", () => {
-    expect(workerEnv("claude", { CLAUDE_CONFIG_DIR: "~/.claude", EXTRA_FLAG: "1" }, "/Users/x", {})).toEqual({
+    expect(
+      workerEnv(
+        "claude",
+        { CLAUDE_CONFIG_DIR: "~/.claude", EXTRA_FLAG: "1" },
+        "/Users/x",
+        {}
+      )
+    ).toEqual({
       EXTRA_FLAG: "1",
     });
-    expect(workerEnv("claude", { CLAUDE_CONFIG_DIR: "/Users/x/.claude/" }, "/Users/x", {})).toEqual({});
-    expect(workerEnv("codex", { CODEX_HOME: "~/.codex" }, "/Users/x", {})).toEqual({});
+    expect(
+      workerEnv(
+        "claude",
+        { CLAUDE_CONFIG_DIR: "/Users/x/.claude/" },
+        "/Users/x",
+        {}
+      )
+    ).toEqual({});
+    expect(
+      workerEnv("codex", { CODEX_HOME: "~/.codex" }, "/Users/x", {})
+    ).toEqual({});
     expect(
       workerEnv("claude", { CLAUDE_CONFIG_DIR: "~/.claude" }, "/Users/x", {
         CLAUDE_CONFIG_DIR: "/Users/x/.claude",
@@ -808,10 +1004,14 @@ describe("herdr-dispatch worker environment", () => {
   });
 
   test("a separately authenticated config home still reaches the worker", () => {
-    expect(workerEnv("claude", { CLAUDE_CONFIG_DIR: "~/.claude-a" }, "/Users/x", {})).toEqual({
+    expect(
+      workerEnv("claude", { CLAUDE_CONFIG_DIR: "~/.claude-a" }, "/Users/x", {})
+    ).toEqual({
       CLAUDE_CONFIG_DIR: "~/.claude-a",
     });
-    expect(workerEnv("codex", { CODEX_HOME: "~/.codex-a" }, "/Users/x", {})).toEqual({
+    expect(
+      workerEnv("codex", { CODEX_HOME: "~/.codex-a" }, "/Users/x", {})
+    ).toEqual({
       CODEX_HOME: "~/.codex-a",
     });
   });
@@ -821,7 +1021,12 @@ describe("herdr-dispatch worker environment", () => {
     expect(plan.startTimeout).toBe(300000);
     expect(plan.timeout).toBe(900000);
     expect(plan.deliveryWindow).toBe(8000);
-    expect(planDispatch(options, { ...herdrEnv, PSTACK_HERDR_DELIVERY_WINDOW_MS: "250" }).deliveryWindow).toBe(250);
+    expect(
+      planDispatch(options, {
+        ...herdrEnv,
+        PSTACK_HERDR_DELIVERY_WINDOW_MS: "250",
+      }).deliveryWindow
+    ).toBe(250);
   });
 
   test("the plan drops the default Claude home from the pane environment", () => {
@@ -830,14 +1035,26 @@ describe("herdr-dispatch worker environment", () => {
     writeFileSync(
       routes,
       JSON.stringify({
-        profiles: { "claude-main": { kind: "claude", env: { CLAUDE_CONFIG_DIR: "~/.claude" } } },
+        profiles: {
+          "claude-main": {
+            kind: "claude",
+            env: { CLAUDE_CONFIG_DIR: "~/.claude" },
+          },
+        },
         roles: { judgment: { profiles: ["claude-main"], strategy: "first" } },
       })
     );
     try {
-      const plan = planDispatch({ ...options, role: "judgment", routes }, herdrEnv);
-      const envValues = plan.placeArgs.filter((_, i) => plan.placeArgs[i - 1] === "--env");
-      expect(envValues.some((v) => v.startsWith("CLAUDE_CONFIG_DIR="))).toBe(false);
+      const plan = planDispatch(
+        { ...options, role: "judgment", routes },
+        herdrEnv
+      );
+      const envValues = plan.placeArgs.filter(
+        (_, i) => plan.placeArgs[i - 1] === "--env"
+      );
+      expect(envValues.some((v) => v.startsWith("CLAUDE_CONFIG_DIR="))).toBe(
+        false
+      );
       expect(envValues).toContain("PSTACK_HERDR_DEPTH=1");
       expect(plan.profile).toBe("claude-main");
     } finally {
@@ -848,8 +1065,12 @@ describe("herdr-dispatch worker environment", () => {
 
 describe("herdr-dispatch turn evidence", () => {
   test("the needle is the prompt's first line after the read-only prefix, JSON-escaped", () => {
-    expect(promptNeedle(applyReadonlyPrompt('# Task "one"\nbody', true))).toBe('# Task \\"one\\"');
-    expect(promptNeedle("\n\nSecond line first\nmore")).toBe("Second line first");
+    expect(promptNeedle(applyReadonlyPrompt('# Task "one"\nbody', true))).toBe(
+      '# Task \\"one\\"'
+    );
+    expect(promptNeedle("\n\nSecond line first\nmore")).toBe(
+      "Second line first"
+    );
     expect(promptNeedle("x".repeat(200)).length).toBe(120);
   });
 
@@ -860,18 +1081,29 @@ describe("herdr-dispatch turn evidence", () => {
       mkdirSync(day, { recursive: true });
       const since = Date.now() - 1000;
       const prompt = "# PARK-1: rename the flag\n\nDo the work.";
-      const line = JSON.stringify({ payload: { type: "message", role: "user", content: [{ type: "input_text", text: prompt }] } });
+      const line = JSON.stringify({
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: prompt }],
+        },
+      });
       const stale = join(day, "rollout-old.jsonl");
       writeFileSync(stale, `${line}\n`);
       const old = new Date(since - 60_000);
       utimesSync(stale, old, old);
       const query = { kind: "codex" as const, prompt, since, env: {}, home };
       expect(turnEvidence(query)).toBe(false);
-      writeFileSync(join(day, "rollout-silent.jsonl"), `${JSON.stringify({ payload: { type: "session_meta" } })}\n`);
+      writeFileSync(
+        join(day, "rollout-silent.jsonl"),
+        `${JSON.stringify({ payload: { type: "session_meta" } })}\n`
+      );
       expect(turnEvidence(query)).toBe(false);
       writeFileSync(join(day, "rollout-live.jsonl"), `${line}\n`);
       expect(turnEvidence(query)).toBe(true);
-      expect(turnEvidence({ ...query, prompt: "# PARK-2: something else" })).toBe(false);
+      expect(
+        turnEvidence({ ...query, prompt: "# PARK-2: something else" })
+      ).toBe(false);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -883,14 +1115,37 @@ describe("herdr-dispatch turn evidence", () => {
       const projects = join(home, "claude-alt", "projects", "-Users-me-repo");
       mkdirSync(projects, { recursive: true });
       const prompt = "Review the diff.\nDetails follow.";
-      const line = JSON.stringify({ type: "user", message: { role: "user", content: prompt } });
+      const line = JSON.stringify({
+        type: "user",
+        message: { role: "user", content: prompt },
+      });
       writeFileSync(join(projects, "other.jsonl"), `${line}\n`);
       const since = Date.now() - 1000;
       const env = { CLAUDE_CONFIG_DIR: join(home, "claude-alt") };
-      expect(turnEvidence({ kind: "claude", prompt, since, sessionId: "mine", env, home })).toBe(false);
+      expect(
+        turnEvidence({
+          kind: "claude",
+          prompt,
+          since,
+          sessionId: "mine",
+          env,
+          home,
+        })
+      ).toBe(false);
       writeFileSync(join(projects, "mine.jsonl"), `${line}\n`);
-      expect(turnEvidence({ kind: "claude", prompt, since, sessionId: "mine", env, home })).toBe(true);
-      expect(turnEvidence({ kind: "claude", prompt, since, env, home })).toBe(true);
+      expect(
+        turnEvidence({
+          kind: "claude",
+          prompt,
+          since,
+          sessionId: "mine",
+          env,
+          home,
+        })
+      ).toBe(true);
+      expect(turnEvidence({ kind: "claude", prompt, since, env, home })).toBe(
+        true
+      );
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -905,7 +1160,10 @@ describe("herdr-dispatch turn evidence", () => {
       expect(turnEvidence(query)).toBe(false);
       const projects = join(home, ".claude", "projects", "pstack-herdr-e2e");
       mkdirSync(projects, { recursive: true });
-      const line = JSON.stringify({ type: "user", message: { role: "user", content: prompt } });
+      const line = JSON.stringify({
+        type: "user",
+        message: { role: "user", content: prompt },
+      });
       writeFileSync(join(projects, "session.jsonl"), `${line}\n`);
       expect(turnEvidence(query)).toBe(true);
     } finally {
