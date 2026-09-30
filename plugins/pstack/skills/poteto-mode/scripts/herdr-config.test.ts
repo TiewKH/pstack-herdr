@@ -117,6 +117,7 @@ describe("herdr deterministic setup", () => {
     badCodex.profiles[0] = {
       ...badCodex.profiles[0],
       kind: "codex",
+      model: "gpt-6-sol",
       effort: "minimal",
     };
     expect(() => parseSetupInput(JSON.stringify(badCodex))).toThrow(
@@ -127,10 +128,32 @@ describe("herdr deterministic setup", () => {
   test("codex profiles accept the max and ultra levels Codex now offers", () => {
     for (const effort of ["max", "ultra"]) {
       const input = structuredClone(setup);
-      input.profiles[0] = { ...input.profiles[0], kind: "codex", effort };
+      input.profiles[0] = {
+        ...input.profiles[0],
+        kind: "codex",
+        model: "gpt-6-sol",
+        effort,
+      };
       const config = buildRoutes({}, parseSetupInput(JSON.stringify(input)));
       expect(config.profiles?.["claude-strong"].effort).toBe(effort);
     }
+  });
+
+  test("a profile whose model belongs to the other CLI is rejected", () => {
+    const input = structuredClone(setup);
+    input.profiles[0].model = "gpt-6.1-sol";
+    expect(() => parseSetupInput(JSON.stringify(input))).toThrow(
+      "profiles.claude-strong.model gpt-6.1-sol is a codex model, but the profile runs claude"
+    );
+    expect(() =>
+      parseRoutes(
+        JSON.stringify({
+          profiles: { "codex-a": { kind: "codex", model: "claude-opus-5-5" } },
+        })
+      )
+    ).toThrow(
+      "profiles.codex-a.model claude-opus-5-5 is a claude model, but the profile runs codex"
+    );
   });
 
   test("two profiles may share one subscription config home", () => {
