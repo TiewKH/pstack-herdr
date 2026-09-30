@@ -26,7 +26,7 @@ The setup skill owns discovery and user choices. The script owns validation, can
 
 ### 1. Detect worker runtimes and models
 
-Determine which worker CLIs are available for Herdr to launch: Claude Code, Codex, or both. Offer the Herdr worker IDs in [Models](#models) as the menu for each CLI, and keep only the ones that CLI accepts: `claude -p --model <id> "Reply with exactly OK"` and `codex exec -m <id> "Reply with exactly OK"` each answer `OK` for a usable ID. Write full IDs into profiles. The worker CLI runs a full ID as that exact version, while a family name runs whichever model is current in that family, so a family name moves when a new model ships.
+Determine which worker CLIs are available for Herdr to launch: Claude Code, Codex, or both. Offer the Herdr worker IDs in [Models](#models) as the menu for each CLI, and keep only the ones that CLI accepts: `claude -p --model <id> "Reply with exactly OK"` and `codex exec -m <id> "Reply with exactly OK"` each answer `OK` for a usable ID. The menu is a starting point, not a limit: also offer any newer ID the CLI knows. For Codex, `codex debug models` lists every model with `visibility: list`. For Claude, accept any `claude-*` ID the user names. Run the same `OK` check on each before writing it. Write full IDs into profiles. The worker CLI runs a full ID as that exact version, while a family name runs whichever model is current in that family, so a family name moves when a new model ships.
 
 If the user has additional authenticated CLI homes, ask for their paths. Do not copy, move, or inspect credentials. Treat each config home as an opaque authenticated profile.
 
@@ -49,7 +49,7 @@ Collect profiles with:
 - a stable profile `name`,
 - `kind`: `claude` or `codex`,
 - optional `model` (use `inherit` when no model should be forced),
-- optional `effort`, a reasoning-effort override passed straight to the worker CLI: `claude --effort <level>` (`low`, `medium`, `high`, `xhigh`, `max`) or `codex -c model_reasoning_effort="<level>"` (`minimal`, `low`, `medium`, `high`, `xhigh`). Leave unset to run the CLI's own default. Effort is a separate axis from model — offer it as its own question rather than folding it into the model choice,
+- optional `effort`, a reasoning-effort override passed straight to the worker CLI: `claude --effort <level>` (`low`, `medium`, `high`, `xhigh`, `max`) or `codex -c model_reasoning_effort="<level>"` (`low`, `medium`, `high`, `xhigh`, `max`, `ultra`; which ones a model takes is in `codex debug models`). Leave unset to run the CLI's own default. Effort is a separate axis from model — offer it as its own question rather than folding it into the model choice,
 - optional `config_home`,
 - optional extra `env` entries.
 
@@ -258,4 +258,4 @@ Stamped from `plugins/pstack/models.json` (edit there, rerun `tools/generate.mjs
 - Default reasoning effort: `session`
 - Single-role default: `opus`
 - Herdr Claude worker IDs: Opus 5.5 (`claude-opus-5-5`), Opus 5 (`claude-opus-5`), Opus 4.8 (`claude-opus-4-8`), Opus 4.6 (`claude-opus-4-6`), Fable 5.1 (`claude-fable-5-1`), Fable 5 (`claude-fable-5`), Sonnet 5 (`claude-sonnet-5`), Sonnet 4.6 (`claude-sonnet-4-6`), Haiku 4.5 (`claude-haiku-4-5`)
-- Herdr Codex worker IDs: GPT-6-Sol (`gpt-6-sol`), GPT-6-Astra (`gpt-6-astra`), GPT-6-Luna (`gpt-6-luna`), GPT-5.6-Sol (`gpt-5.6-sol`), GPT-5.6-Terra (`gpt-5.6-terra`), GPT-5.6-Luna (`gpt-5.6-luna`), GPT-5.5 (`gpt-5.5`)
+- Herdr Codex worker IDs: GPT-6.1-Sol (`gpt-6.1-sol`), GPT-6-Sol (`gpt-6-sol`), GPT-6-Astra (`gpt-6-astra`), GPT-6-Luna (`gpt-6-luna`), GPT-5.6-Sol (`gpt-5.6-sol`), GPT-5.6-Terra (`gpt-5.6-terra`), GPT-5.6-Luna (`gpt-5.6-luna`), GPT-5.5 (`gpt-5.5`)

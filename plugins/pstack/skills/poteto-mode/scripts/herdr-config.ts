@@ -129,7 +129,7 @@ function parseEnvMap(raw: unknown, label: string): Record<string, string> {
 
 const VALID_EFFORTS: Record<AgentKind, readonly string[]> = {
   claude: ["low", "medium", "high", "xhigh", "max"],
-  codex: ["minimal", "low", "medium", "high", "xhigh"],
+  codex: ["low", "medium", "high", "xhigh", "max", "ultra"],
 };
 
 function parseProfile(raw: unknown, label: string): Profile {

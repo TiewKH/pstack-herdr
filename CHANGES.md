@@ -4,7 +4,13 @@ This file is the release changelog, with one `## <version> - <title>` entry per 
 
 ## 0.9.54 - pstack-herdr: merge pstack-claude 0.9.53, newest models in Herdr setup
 
-TODO
+This release merges `michael-denyer/pstack-claude` 0.9.44 through 0.9.53 into the fork. It brings upstream's reasoning effort per role through effort agents, the override sheet under `CLAUDE_CONFIG_DIR`, the planned generator writes and `generate.mjs --check`, `parseModels` at the generator boundary, the stamped Codex preamble, the `tools/forks.json` sync ledger, and the Prettier check on `poteto-mode/scripts`. The version moves to 0.9.54 so installed copies on either line refresh.
+
+PR #11 squash-merged the 0.9.43 sync, so git no longer knew that upstream commit was in the fork. The branch records `7b08003` as merged before merging upstream, so this merge and later ones start from the last synced commit. Merge this release with a merge commit, not a squash, or the next sync hits the same problem.
+
+Herdr keeps working as before. The Agent gate, `herdr-dispatch.ts`, `configure-herdr.ts`, the `herdr` block in `models.json`, and the Herdr pointer in each delegating skill all survive the merge. The generator now stamps the Codex line under each skill heading, so the fork's Herdr sentence moves to its own paragraph below it. The five Herdr scripts are reformatted with upstream's Prettier settings, a formatting-only change. CI runs the Herdr config and dispatch tests beside upstream's `orch` and `watch-pr` suites.
+
+Herdr setup now offers the newest models. The Codex list starts with GPT-6.1-Sol (`gpt-6.1-sol`), which Codex CLI 0.159.2 lists. A Codex profile's `effort` now accepts `low`, `medium`, `high`, `xhigh`, `max`, and `ultra`. It no longer accepts `minimal`: the API returns HTTP 400 for it, and it has disappeared from the model catalog. `gpt-6.1-sol` at `ultra` and `max` answered `OK` through `codex exec` on 30 Sep 2026. Setup step 1 treats the stamped list as a starting point. It offers any newer ID from `codex debug models` or any `claude-*` ID the user names, after the same `OK` check.
 
 ## 0.9.53 - pstack-claude: name the port's copyright holder
 

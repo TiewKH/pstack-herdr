@@ -117,11 +117,20 @@ describe("herdr deterministic setup", () => {
     badCodex.profiles[0] = {
       ...badCodex.profiles[0],
       kind: "codex",
-      effort: "max",
+      effort: "minimal",
     };
     expect(() => parseSetupInput(JSON.stringify(badCodex))).toThrow(
-      "effort must be one of minimal, low, medium, high, xhigh for codex"
+      "effort must be one of low, medium, high, xhigh, max, ultra for codex"
     );
+  });
+
+  test("codex profiles accept the max and ultra levels Codex now offers", () => {
+    for (const effort of ["max", "ultra"]) {
+      const input = structuredClone(setup);
+      input.profiles[0] = { ...input.profiles[0], kind: "codex", effort };
+      const config = buildRoutes({}, parseSetupInput(JSON.stringify(input)));
+      expect(config.profiles?.["claude-strong"].effort).toBe(effort);
+    }
   });
 
   test("two profiles may share one subscription config home", () => {

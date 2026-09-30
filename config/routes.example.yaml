@@ -8,7 +8,7 @@ profiles:
     kind: claude
     model: inherit
     # Optional, independent of model. claude: low/medium/high/xhigh/max.
-    # codex: minimal/low/medium/high/xhigh. Omit to run the CLI's own default.
+    # codex: low/medium/high/xhigh/max/ultra. Omit to run the CLI's own default.
     effort: high
     # No env: the CLI's default home is not an override. CLAUDE_CONFIG_DIR moves
     # Claude's onboarding state, so a worker given ~/.claude boots into first-run
