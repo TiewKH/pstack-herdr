@@ -1258,7 +1258,8 @@ const completeLine = (message: string) =>
 
 function codexSandbox() {
   const root = mkdtempSync(join(tmpdir(), "pstack-herdr-codex-"));
-  const day = join(root, "codex", "sessions", "2026", "09", "30");
+  const sessions = join(root, "codex", "sessions");
+  const day = join(sessions, "2026", "09", "30");
   mkdirSync(day, { recursive: true });
   const env = {
     HERDR_ENV: "1",
@@ -1267,29 +1268,50 @@ function codexSandbox() {
   };
   const rollout = (name: string, ...lines: string[]) =>
     writeFileSync(join(day, `rollout-${name}.jsonl`), `${lines.join("\n")}\n`);
-  return { root, env, rollout };
+  return { root, sessions, env, rollout };
+}
+
+// The prompt a Codex worker was typed, which its rollout quotes in full.
+function promptedWith(onPrompt: (prompt: string) => void) {
+  return (args: string[]) => {
+    onPrompt(args[3]);
+    return promptOk;
+  };
 }
 
 describe("herdr-dispatch codex turns", () => {
-  test("a codex turn is complete only once task_complete follows the prompt", () => {
+  test("a codex turn is complete only once task_complete follows its own marker", () => {
     const box = codexSandbox();
     try {
-      const query = { needle: "ping", since: Date.now() - 1000, env: box.env };
+      const query = {
+        root: box.sessions,
+        needle: "[pstack-herdr turn b-1]",
+        since: Date.now() - 1000,
+      };
       expect(codexTurn(query)).toEqual({ state: "absent" });
-      box.rollout("live", startedLine, askedLine("ping"));
+      box.rollout("b", startedLine, askedLine("ping\n\n[pstack-herdr turn b-1]"));
       expect(codexTurn(query)).toEqual({ state: "running" });
       box.rollout(
-        "live",
-        completeLine("earlier turn"),
+        "a",
         startedLine,
-        askedLine("ping")
+        askedLine("ping\n\n[pstack-herdr turn a-1]"),
+        completeLine("A's answer")
       );
       expect(codexTurn(query)).toEqual({ state: "running" });
-      box.rollout("live", startedLine, askedLine("ping"), completeLine("PONG"));
+      box.rollout(
+        "b",
+        completeLine("earlier turn"),
+        startedLine,
+        askedLine("ping\n\n[pstack-herdr turn b-1]")
+      );
+      expect(codexTurn(query)).toEqual({ state: "running" });
+      box.rollout(
+        "b",
+        startedLine,
+        askedLine("ping\n\n[pstack-herdr turn b-1]"),
+        completeLine("PONG")
+      );
       expect(codexTurn(query)).toEqual({ state: "complete", message: "PONG" });
-      expect(codexTurn({ ...query, needle: "other prompt" })).toEqual({
-        state: "absent",
-      });
     } finally {
       rmSync(box.root, { recursive: true, force: true });
     }
@@ -1310,20 +1332,39 @@ describe("herdr-dispatch codex turns", () => {
     }
   });
 
+  test("a codex prompt its rollout records is delivered even while Herdr reads unknown", async () => {
+    const box = codexSandbox();
+    try {
+      const { calls, exec } = scriptedExec({
+        ...happyPath(),
+        "agent prompt": promptedWith((prompt) =>
+          box.rollout("w", startedLine, askedLine(prompt), completeLine("OK"))
+        ),
+        "agent get": getStatus("unknown"),
+        "pane close": closeOk,
+      });
+      const result = await dispatch(
+        { ...options, kind: "codex", wait: true },
+        box.env,
+        exec
+      );
+      expect(result).toMatchObject({ status: "done", output: "OK" });
+      expect(
+        calls.filter((args) => commandKey(args) === "agent prompt")
+      ).toHaveLength(1);
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
   test("a finished codex turn that Herdr reads as unknown is done, with the final message as output", async () => {
     const box = codexSandbox();
     try {
       const { calls, exec } = scriptedExec({
         ...happyPath(),
-        "agent prompt": () => {
-          box.rollout(
-            "w",
-            startedLine,
-            askedLine("ping"),
-            completeLine("PONG")
-          );
-          return promptOk;
-        },
+        "agent prompt": promptedWith((prompt) =>
+          box.rollout("w", startedLine, askedLine(prompt), completeLine("PONG"))
+        ),
         "agent get": getAfterPrompt("working", "unknown"),
         "pane close": closeOk,
       });
@@ -1353,10 +1394,9 @@ describe("herdr-dispatch codex turns", () => {
     try {
       const { calls, exec } = scriptedExec({
         ...happyPath(),
-        "agent prompt": () => {
-          box.rollout("w", startedLine, askedLine("ping"));
-          return promptOk;
-        },
+        "agent prompt": promptedWith((prompt) =>
+          box.rollout("w", startedLine, askedLine(prompt))
+        ),
         "agent get": getAfterPrompt("working", "idle"),
         "agent read": textResult("Working (3s)\n"),
       });
@@ -1400,15 +1440,80 @@ describe("herdr-dispatch codex turns", () => {
     }
   });
 
+  test("a codex profile's own CODEX_HOME is where its rollout is read", async () => {
+    const box = codexSandbox();
+    try {
+      const alt = join(box.root, "codex-alt");
+      const day = join(alt, "sessions", "2026", "09", "30");
+      mkdirSync(day, { recursive: true });
+      const routes = join(box.root, "routes.json");
+      writeFileSync(
+        routes,
+        JSON.stringify({
+          profiles: { second: { kind: "codex", env: { CODEX_HOME: alt } } },
+          roles: { reviewer: { profiles: ["second"] } },
+        })
+      );
+      const { exec } = scriptedExec({
+        ...happyPath(),
+        "agent prompt": promptedWith((prompt) =>
+          writeFileSync(
+            join(day, "rollout-w.jsonl"),
+            [startedLine, askedLine(prompt), completeLine("LGTM")].join("\n")
+          )
+        ),
+        "agent get": getStatus("unknown"),
+        "pane close": closeOk,
+      });
+      const result = await dispatch(
+        {
+          ...options,
+          role: "reviewer",
+          kind: undefined,
+          routes,
+          wait: true,
+          timeout: 0,
+        },
+        box.env,
+        exec
+      );
+      expect(result).toMatchObject({ status: "done", output: "LGTM" });
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
+  test("a codex dispatch that cannot save its turn record closes the pane", async () => {
+    const box = codexSandbox();
+    try {
+      writeFileSync(join(box.root, "tmp"), "not a directory");
+      const { calls, exec } = scriptedExec({
+        ...happyPath(),
+        "agent get": getStatus("working"),
+        "pane close": closeOk,
+      });
+      await expect(
+        dispatch({ ...options, kind: "codex" }, box.env, exec)
+      ).rejects.toThrow();
+      expect(calls.at(-1)).toEqual(["pane", "close", "w1:p2"]);
+      expect(calls.some((args) => commandKey(args) === "agent prompt")).toBe(
+        false
+      );
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
   test("collect finishes a codex worker from the turn its dispatch recorded", async () => {
     const box = codexSandbox();
     try {
+      let typed = "";
       const handed = scriptedExec({
         ...happyPath(),
-        "agent prompt": () => {
-          box.rollout("w", startedLine, askedLine("ping"));
-          return promptOk;
-        },
+        "agent prompt": promptedWith((prompt) => {
+          typed = prompt;
+          box.rollout("w", startedLine, askedLine(prompt));
+        }),
         "agent get": getStatus("working"),
       });
       await dispatch(
@@ -1416,15 +1521,13 @@ describe("herdr-dispatch codex turns", () => {
         box.env,
         handed.exec
       );
-      box.rollout("w", startedLine, askedLine("ping"), completeLine("LGTM"));
+      box.rollout("w", startedLine, askedLine(typed), completeLine("LGTM"));
+      const pane = codexGet("unknown");
       const { calls, exec } = scriptedExec({
-        "agent get": (() => {
-          const pane = codexGet("unknown");
-          return () => ({
-            ...pane,
-            stdout: pane.stdout.replace("w1:p7", "w1:p2"),
-          });
-        })(),
+        "agent get": {
+          ...pane,
+          stdout: pane.stdout.replace("w1:p7", "w1:p2"),
+        },
         "pane close": closeOk,
       });
       const result = await collect(collectOptions, box.env, exec);
@@ -1448,9 +1551,7 @@ describe("herdr-dispatch codex turns", () => {
   test("collect refuses a codex worker it has no dispatch record for and leaves it open", async () => {
     const box = codexSandbox();
     try {
-      const { calls, exec } = scriptedExec({
-        "agent get": codexGet("unknown"),
-      });
+      const { calls, exec } = scriptedExec({ "agent get": codexGet("unknown") });
       await expect(collect(collectOptions, box.env, exec)).rejects.toThrow(
         /no dispatch record for ci-review/
       );
