@@ -2,6 +2,10 @@
 
 This file is the release changelog, with one `## <version> - <title>` entry per release, newest first. The Cursor-to-Claude rewrite rules live in [`tools/substitutions.json`](tools/substitutions.json), and the [sync boundary](CONTRIBUTING.md#the-sync-boundary) in `CONTRIBUTING.md` defines which changes belong upstream.
 
+## 0.9.56 - pstack-herdr: Sonnet 5.5 in the Herdr Claude menu
+
+The Herdr Claude menu now lists Sonnet 5.5 (`claude-sonnet-5-5`) ahead of Sonnet 5. 0.9.54 called the Claude list current, but Claude Code 2.1.285's catalog also carries Sonnet 5.5, and it answered `OK` through `claude -p --model claude-sonnet-5-5` on 30 Sep 2026. The newest ID in each family is now Opus 5.5, Fable 5.1, Sonnet 5.5, and Haiku 4.5. `config/setup.example.json` moves its fast profile to `claude-sonnet-5-5`. Setup step 1 tells the agent to try the next version up from each Claude family's newest menu ID, and names the error an unknown ID returns.
+
 ## 0.9.55 - pstack-herdr: --kind narrows the route, and a model must match its CLI
 
 `herdr-dispatch.ts --kind` was read only when no route matched the role. With a route in place, `--role verifier --kind codex --model gpt-6.1-sol` ran the role's Claude profile, passed `--model gpt-6.1-sol` to Claude Code, and reported `done`.
