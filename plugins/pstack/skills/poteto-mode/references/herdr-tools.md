@@ -15,15 +15,15 @@ A `PreToolUse` hook on `Agent` (`herdr-agent-gate.sh` under the plugin hooks dir
 | pstack / Claude action | Herdr equivalent |
 |------------------------|------------------|
 | Dispatch a subagent (`Agent` / `Task`) | `herdr-dispatch.ts` |
-| Dispatch N parallel subagents in one turn | N dispatcher processes launched concurrently, then collect results |
+| Dispatch N parallel subagents in one turn | N dispatcher processes launched concurrently without `--wait`, then `--next` |
 | `subagent_type` | ignored; pass the semantic pstack `--role` |
 | `model` | omit unless overriding; `--role` selects a profile from `~/.config/pstack-herdr/routes.yaml` |
 | reasoning effort (no Claude `Agent`/`Task` equivalent) | omit unless overriding; a routed profile's `effort` becomes `--effort <level>` for Claude workers or `-c model_reasoning_effort="<level>"` for Codex workers |
 | `readonly: true` | `--readonly` |
 | `readonly: false` because Claude Ask mode strips MCP | still pass `--readonly`; it disables write tools and does not use Ask/plan mode |
 | `isolation: "worktree"` / exclusive branch | caller creates the worktree or branch, then passes it as `--cwd` |
-| `run_in_background: true` | omit `--wait`; drain later through Herdr agent state and output |
-| Wait for a subagent result | `--wait` |
+| `run_in_background: true` | omit `--wait`; collect with `--next` |
+| Wait for a subagent result | `--wait` for one worker; `--next` for the first of several |
 
 Write substantial worker prompts to a temporary file, then invoke:
 
@@ -40,7 +40,19 @@ bun <poteto-mode>/scripts/herdr-dispatch.ts \
 
 Use `--profile`, `--kind`, `--model`, or `--effort` only to override routing deliberately. `--kind` narrows the role's pool to profiles of that CLI and fails when the pool has none. A `--model` that belongs to the other CLI (`gpt-*` on Claude, `claude-*` or a Claude family name on Codex) fails before a pane opens.
 
-For parallel fan-out, launch dispatcher processes concurrently rather than dispatching one and waiting before starting the next. Each dispatcher creates its own Herdr pane and agent. Collect each JSON result after all launches have begun.
+For parallel fan-out, launch dispatcher processes concurrently rather than dispatching one and waiting before starting the next. Each dispatcher creates its own Herdr pane and agent. Without `--wait`, a dispatcher returns as soon as its prompt lands.
+
+## Collecting background workers
+
+Never sleep and re-check a worker. Block on `--next` instead:
+
+```bash
+bun <poteto-mode>/scripts/herdr-dispatch.ts --next <name> [<name> ...] --timeout <ms>
+```
+
+It returns as soon as any named worker settles. Herdr pushes each worker's status changes to it, and it reads a Codex worker's rollout every second. It reads and closes every worker that has settled, then prints `{"settled": [...], "pending": [...]}`. Each `settled` entry has the same fields as a `--collect` result, or `agent` and `error` when that worker could not be read. Act on each settled entry, then call `--next` again with the `pending` names until none are left. A budget that ends with nothing settled returns an empty `settled` and every name in `pending`. `--next` only watches. A stopped `--next` or one whose budget ends leaves every worker open, so a shell tool's own timeout loses no work. Pass each name to one `--next` at a time.
+
+On Claude Code, `--next` can run as a background Bash command. Its exit wakes you, as a background `Agent` completion would. On Codex, run it in the foreground. If the shell tool returns while `--next` is still running, keep reading that same process rather than starting a second one.
 
 ## Roles
 
@@ -78,7 +90,7 @@ bun <poteto-mode>/scripts/herdr-dispatch.ts --collect --name <agent-name> --time
 
 It returns the same settled JSON without `profile` and `depth`, and leaves the pane open again if the worker is still running when the budget ends. Close a pane with `herdr pane close <pane>` only when the work is no longer wanted. A dispatcher stopped by SIGTERM, SIGINT, or SIGHUP while it waits on a worker, in a dispatch or a `--collect`, closes that worker's pane before it exits; SIGKILL cannot be caught and still leaks the pane.
 
-`--timeout` and `orchestration.default_timeout_ms` are one budget applied to `agent start` readiness (at most the 300000 ms Herdr accepts) and to the `agent wait` that follows a prompt. Before typing, the dispatcher waits for the worker to report idle (or `unknown` for Codex, which Herdr 0.9.2+ never reports idle), then counts the prompt delivered once the agent leaves idle (`working`, `blocked`, or `done`) within `PSTACK_HERDR_DELIVERY_WINDOW_MS` (default 8000), retrying the prompt once. A prompt that never lands is an error that carries the screen, never a `done` over an empty composer.
+`--timeout` and `orchestration.default_timeout_ms` are one budget applied to `agent start` readiness (at most the 300000 ms Herdr accepts) and to the `agent wait` that follows a prompt. Before typing, the dispatcher waits for the worker to report idle (or `unknown` or `done` for Codex: Herdr 0.9.2+ never reports a ready Codex composer as idle, and 0.9.3 reads a fresh one as `done`), then counts the prompt delivered once the agent leaves idle (`working`, `blocked`, or, for Claude, `done`) within `PSTACK_HERDR_DELIVERY_WINDOW_MS` (default 8000), retrying the prompt once. A prompt that never lands is an error that carries the screen, never a `done` over an empty composer.
 
 The dispatcher refuses to run outside `HERDR_ENV=1` and refuses recursive delegation at the configured depth limit. It owns the pane through prompt acceptance; a start or prompt failure closes that pane.
 
@@ -102,7 +114,7 @@ Most skills need only the table above. These need one more mapping:
 | Feature / bug-fix / refactoring / perf-issue / hillclimb | Implementation delegates use `--role implementation`, or `difficult-implementation` for concurrency, algorithms, or cross-cutting work, with an exclusive writer `--cwd`. |
 | Eval | Candidates use `--role arena-candidate` in sanitized directories. The judge uses `--role arena-judge --readonly`. |
 | Orchestrate / autopilot | Owners that must themselves delegate use `--role subcoordinator`. Direct writers use `--role implementation`. Verifiers use `--role verifier --readonly`. |
-| Autonomous run | The watcher uses `--role explorer` without `--wait`. |
+| Autonomous run | The watcher uses `--role explorer` without `--wait`, collected with `--next`. |
 
 ## Native fallback
 
