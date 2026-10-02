@@ -2,6 +2,16 @@
 
 This file is the release changelog, with one `## <version> - <title>` entry per release, newest first. The Cursor-to-Claude rewrite rules live in [`tools/substitutions.json`](tools/substitutions.json), and the [sync boundary](CONTRIBUTING.md#the-sync-boundary) in `CONTRIBUTING.md` defines which changes belong upstream.
 
+## 0.9.58 - pstack-herdr: collect background workers with --next
+
+A background dispatch, one without `--wait`, returned once its prompt landed, and `herdr-tools.md` told the orchestrator to "drain later through Herdr agent state and output". Nothing told the orchestrator when a worker finished, so it slept, checked, and slept again. A worker that finished early sat until the next check.
+
+`herdr-dispatch.ts --next <name> [<name> ...]` blocks until the first named worker settles, reads and closes every worker that has, and prints `{"settled": [...], "pending": [...]}`. The orchestrator calls it again with the pending names. It subscribes to `pane.agent_status_changed` for the workers' panes over Herdr's `events.subscribe` socket API and treats each event as a cue to read state again. A Codex worker's rollout is still read every second, because Herdr cannot see a Codex turn end. Without a socket, or after `events_lost`, it reads every second. `--next` owns no pane, so a stopped `--next`, or one whose budget ends, leaves every worker open. It runs the same under a Claude Code or a Codex orchestrator, and from bash or zsh: agent names hold no spaces, so it splits a list that zsh passed as one unsplit word. The Agent gate's deny message and `herdr-tools.md` now name `--next` and forbid sleep loops.
+
+Live on Herdr 0.9.3, with two Claude and two Codex workers, each drain round returned 0.23 to 0.89 s after its worker finished. In a Claude-only run, `--next` saw `done` 74 ms before Herdr's own `agent wait` returned. The rest of each round reads the output (about 0.6 s) and closes the pane (about 0.1 s).
+
+The same runs found that Herdr 0.9.3 reads a fresh Codex composer as `done`. The wait before typing accepted only `idle`, `blocked`, or `unknown` for Codex, so every Codex dispatch sat out its whole budget, 189 s at the default 180000 ms, before it typed. That wait now also accepts `done` for Codex. A Codex prompt now counts as delivered only on `working`, `blocked`, or its rollout quoting the marker, never on `done`, which the composer already showed before the prompt. Four dispatches launched together took 188 s before the fix and 10 s after.
+
 ## 0.9.57 - pstack-herdr: end a Codex turn at its rollout's task_complete
 
 Herdr 0.9.2 (herdrdev/herdr#4563) stopped reading a quiet Codex screen as `idle`. A ready Codex composer and a finished Codex turn now both read `unknown`, and the Codex integration reports only the session ID. On Herdr 0.9.3, a one-word Codex dispatch waited the whole budget for `idle` before typing, waited the whole budget again for the turn, then failed on `agent read` with `agent_not_idle` and left its pane open: 128 s at `--timeout 60000` for a turn Codex finished in 2.5 s. Herdr 0.9.1 has the opposite defect (herdrdev/herdr#4507): it can read a running Codex turn as `idle`, the prompt-quote check passes, and the dispatcher closes a working pane.

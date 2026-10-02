@@ -8,6 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { connect, type Socket } from "node:net";
 import { constants, homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { ensureDependenciesInstalled } from "./bootstrap.ts";
@@ -76,6 +77,36 @@ export interface CollectResult extends Settlement {
   pane: string;
   kind: AgentKind;
 }
+
+export interface NextOptions {
+  names: string[];
+  timeout?: number;
+  keepPane: boolean;
+  routes?: string;
+}
+
+export interface CollectFailure {
+  agent: string;
+  error: string;
+}
+
+export interface NextResult {
+  settled: Array<CollectResult | CollectFailure>;
+  pending: string[];
+}
+
+// Wakes the caller when Herdr reports a status change on a watched pane. `live` is
+// false once the subscription is gone, and the caller reads on a timer instead.
+export interface StatusWatch {
+  readonly live: boolean;
+  changed(ms: number): Promise<void>;
+  close(): void;
+}
+
+export type WatchStatus = (
+  panes: string[],
+  env: NodeJS.ProcessEnv
+) => Promise<StatusWatch>;
 
 export interface CommandResult {
   stdout: string;
@@ -167,9 +198,18 @@ const LONG_ARG_CHARS = 120;
 const EVIDENCE_SKEW_MS = 2000;
 const EVIDENCE_NEEDLE_CHARS = 120;
 const TURN_POLL_MS = 1000;
+// A live status subscription wakes `--next` on every change; this only bounds a missed event.
+const WATCH_HEARTBEAT_MS = 10000;
+const SUBSCRIBE_TIMEOUT_MS = 2000;
+// Herdr 0.9.3 reads a fresh Codex composer as `done`, so `done` cannot prove a Codex
+// prompt landed; its rollout quoting the marker does.
 const SETTLED_BEFORE_PROMPT: Record<AgentKind, AgentStatus[]> = {
   claude: ["idle", "blocked"],
-  codex: ["idle", "blocked", "unknown"],
+  codex: ["idle", "blocked", "unknown", "done"],
+};
+const DELIVERED: Record<AgentKind, AgentStatus[]> = {
+  claude: ["working", "blocked", "done"],
+  codex: ["working", "blocked"],
 };
 
 function asObject(value: unknown, label: string): Record<string, unknown> {
@@ -895,6 +935,7 @@ async function settleBeforePrompt(
 
 async function leftIdle(
   name: string,
+  kind: AgentKind,
   windowMs: number,
   landed: () => boolean,
   exec: HerdrExec
@@ -905,8 +946,7 @@ async function leftIdle(
     const status = agentStatus(
       await runHerdrJson(["agent", "get", name], exec)
     );
-    if (status === "working" || status === "blocked" || status === "done")
-      return true;
+    if (DELIVERED[kind].includes(status)) return true;
     if (Date.now() >= deadline) return false;
     await sleep(DELIVERY_POLL_MS);
   }
@@ -914,6 +954,7 @@ async function leftIdle(
 
 async function deliverPrompt(
   name: string,
+  kind: AgentKind,
   prompt: string,
   windowMs: number,
   landed: () => boolean,
@@ -921,7 +962,7 @@ async function deliverPrompt(
 ): Promise<void> {
   for (let attempt = 1; attempt <= PROMPT_ATTEMPTS; attempt += 1) {
     await runHerdrCommand(["agent", "prompt", name, prompt], exec);
-    if (await leftIdle(name, windowMs, landed, exec)) return;
+    if (await leftIdle(name, kind, windowMs, landed, exec)) return;
   }
   throw new Error(
     `prompt to ${name} was not delivered after ${PROMPT_ATTEMPTS} attempts: the agent never left idle`
@@ -1064,6 +1105,7 @@ export async function dispatch(
     if (turn) saveTurnRecord(options.name, turn, env);
     await deliverPrompt(
       options.name,
+      plan.kind,
       plan.prompt,
       plan.deliveryWindow,
       () => turn !== undefined && codexTurn(turn).state !== "absent",
@@ -1162,6 +1204,216 @@ export async function collect(
   };
 }
 
+// Herdr pushes each status change on the subscribed panes; any line after the
+// acknowledgement is only a cue to read state again.
+export async function watchStatus(
+  panes: string[],
+  env: NodeJS.ProcessEnv
+): Promise<StatusWatch> {
+  let subscribed = false;
+  let closed = false;
+  let dirty = false;
+  let wake: (() => void) | undefined;
+  const signal = () => {
+    if (wake) wake();
+    else dirty = true;
+  };
+  let socket: Socket | undefined;
+  const path = env.HERDR_SOCKET_PATH;
+  if (path) {
+    const opened = connect(path);
+    socket = opened;
+    subscribed = await new Promise<boolean>((ready) => {
+      const timer = setTimeout(() => ready(false), SUBSCRIBE_TIMEOUT_MS);
+      const end = () => {
+        closed = true;
+        clearTimeout(timer);
+        ready(false);
+        signal();
+      };
+      opened.on("error", end);
+      opened.on("close", end);
+      opened.on("connect", () => {
+        opened.write(
+          `${JSON.stringify({
+            id: "pstack-herdr-next",
+            method: "events.subscribe",
+            params: {
+              subscriptions: panes.map((pane) => ({
+                type: "pane.agent_status_changed",
+                pane_id: pane,
+              })),
+            },
+          })}\n`
+        );
+      });
+      let buffer = "";
+      let started = false;
+      opened.on("data", (chunk) => {
+        buffer += chunk.toString();
+        for (let at; (at = buffer.indexOf("\n")) >= 0; ) {
+          const line = buffer.slice(0, at);
+          buffer = buffer.slice(at + 1);
+          let message: { result?: { type?: unknown }; error?: unknown };
+          try {
+            message = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (message.error !== undefined) {
+            opened.destroy();
+          } else if (!started) {
+            if (message.result?.type !== "subscription_started") continue;
+            started = true;
+            clearTimeout(timer);
+            ready(true);
+          } else {
+            signal();
+          }
+        }
+      });
+    });
+    if (!subscribed) socket.destroy();
+  }
+  // Nothing has been read yet, so a change during setup needs no extra wake-up.
+  dirty = false;
+  return {
+    get live() {
+      return subscribed && !closed;
+    },
+    changed(ms) {
+      if (dirty) {
+        dirty = false;
+        return Promise.resolve();
+      }
+      return new Promise((done) => {
+        const timer = setTimeout(finish, Math.max(0, ms));
+        function finish() {
+          clearTimeout(timer);
+          wake = undefined;
+          done();
+        }
+        wake = finish;
+      });
+    },
+    close() {
+      socket?.destroy();
+    },
+  };
+}
+
+interface NextWorker {
+  name: string;
+  pane: string;
+  kind: AgentKind;
+  record?: CodexTurnRecord;
+}
+
+function failure(name: string, error: unknown): CollectFailure {
+  return {
+    agent: name,
+    error: error instanceof Error ? error.message : String(error),
+  };
+}
+
+// One read of a worker's state. A settled worker is read, and closed when it is
+// done; one still running returns undefined.
+async function probe(
+  worker: NextWorker,
+  keepPane: boolean,
+  env: NodeJS.ProcessEnv,
+  exec: HerdrExec
+): Promise<CollectResult | undefined> {
+  const { name, pane, kind, record } = worker;
+  if (record) {
+    if (
+      codexTurn(record).state !== "complete" &&
+      agentStatus(await runHerdrJson(["agent", "get", name], exec)) !==
+        "blocked"
+    )
+      return undefined;
+    const settlement = await settleCodex(name, record, 0, keepPane, env, exec);
+    if (settlement.status !== "done" && !settlement.blocked) return undefined;
+    return { agent: name, pane, kind, ...settlement };
+  }
+  const status = agentStatus(await runHerdrJson(["agent", "get", name], exec));
+  if (status !== "done" && status !== "idle" && status !== "blocked")
+    return undefined;
+  return {
+    agent: name,
+    pane,
+    kind,
+    ...(await finish(name, pane, status, keepPane, exec)),
+  };
+}
+
+// Waits for the first of several workers to settle, then collects every one that
+// has. It only watches, so a budget that ends or a stopped `--next` leaves every
+// worker open.
+export async function next(
+  options: NextOptions,
+  env: NodeJS.ProcessEnv = process.env,
+  exec: HerdrExec = spawnHerdr,
+  watch: WatchStatus = watchStatus
+): Promise<NextResult> {
+  if (env.HERDR_ENV !== "1")
+    throw new Error("herdr-dispatch requires HERDR_ENV=1");
+  // Agent names hold no spaces, so a list zsh passed as one unsplit word is split here.
+  const names = [
+    ...new Set(options.names.flatMap((name) => name.split(/\s+/))),
+  ].filter(Boolean);
+  if (names.length === 0) throw new Error("--next needs an agent name");
+  const deadline =
+    Date.now() +
+    defaultTimeout(loadRoutes(options.routes, env), options.timeout);
+  const settled: NextResult["settled"] = [];
+  let pending: NextWorker[] = [];
+  for (const name of names) {
+    try {
+      const { pane, kind } = agentLocation(
+        await runHerdrJson(["agent", "get", name], exec)
+      );
+      const record =
+        kind === "codex" ? loadTurnRecord(name, pane, env) : undefined;
+      pending.push({ name, pane, kind, record });
+    } catch (error) {
+      settled.push(failure(name, error));
+    }
+  }
+  const unsettled = () => pending.map((worker) => worker.name);
+  if (settled.length > 0) return { settled, pending: unsettled() };
+  const watcher = await watch(
+    pending.map((worker) => worker.pane),
+    env
+  );
+  try {
+    for (;;) {
+      const running: NextWorker[] = [];
+      for (const worker of pending) {
+        const result = await probe(worker, options.keepPane, env, exec).catch(
+          (error: unknown) => failure(worker.name, error)
+        );
+        if (result) settled.push(result);
+        else running.push(worker);
+      }
+      pending = running;
+      const left = deadline - Date.now();
+      if (settled.length > 0 || left <= 0)
+        return { settled, pending: unsettled() };
+      // Herdr cannot see a Codex turn end, so its rollout is read every second.
+      const codex = pending.some((worker) => worker.record);
+      await watcher.changed(
+        Math.min(
+          codex || !watcher.live ? TURN_POLL_MS : WATCH_HEARTBEAT_MS,
+          left
+        )
+      );
+    }
+  } finally {
+    watcher.close();
+  }
+}
+
 // An interrupted dispatch or collect closes its worker's pane; nobody is left to read it.
 function closeOnSignal(): (pane: string | undefined) => void {
   let owned: string | undefined;
@@ -1182,7 +1434,7 @@ async function main(): Promise<void> {
   const program = new Command("herdr-dispatch")
     .description("Deterministic pstack delegation through Herdr")
     .option("--role <role>", "semantic pstack role")
-    .requiredOption("--name <name>", "unique Herdr agent name")
+    .option("--name <name>", "unique Herdr agent name")
     .option("--prompt <text>", "worker prompt")
     .option("--prompt-file <path>", "read worker prompt from a file")
     .option("--cwd <path>", "worker cwd/worktree", process.cwd())
@@ -1208,6 +1460,10 @@ async function main(): Promise<void> {
       false
     )
     .option(
+      "--next <names...>",
+      "wait for the first of these workers to settle, then read and close every one that has"
+    )
+    .option(
       "--timeout <ms>",
       "timeout in milliseconds for agent start, --wait, and --collect",
       (value: string) => {
@@ -1225,7 +1481,20 @@ async function main(): Promise<void> {
     )
     .option("--routes <path>", "routes YAML/JSON path");
   program.parse(process.argv);
-  const options = program.opts<DispatchOptions & { collect: boolean }>();
+  const options = program.opts<
+    DispatchOptions & { collect: boolean; next?: string[] }
+  >();
+  if (options.next) {
+    if (options.collect || options.name)
+      throw new Error(
+        "--next takes the agent names; drop --name and --collect"
+      );
+    // Nothing is owned while watching: a stopped --next leaves every worker open.
+    const result = await next({ ...options, names: options.next });
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  if (!options.name) throw new Error("--name is required unless --next is set");
   const own = closeOnSignal();
   if (options.collect) {
     const result = await collect(options, process.env, spawnHerdr, own);
