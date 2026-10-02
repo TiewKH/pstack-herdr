@@ -6,6 +6,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadRoutes, parseRoutes, type RoutesConfig } from "./herdr-config.ts";
@@ -19,6 +20,7 @@ import {
   envFlags,
   inferParentKind,
   isPaneNotReady,
+  next,
   paneId,
   placementArgs,
   parseAgentStatus,
@@ -28,10 +30,12 @@ import {
   selectProfileName,
   stableIndex,
   turnEvidence,
+  watchStatus,
   workerEnv,
   type CommandResult,
   type DispatchOptions,
   type HerdrExec,
+  type StatusWatch,
 } from "./herdr-dispatch.ts";
 
 const config: RoutesConfig = {
@@ -1336,6 +1340,46 @@ describe("herdr-dispatch codex turns", () => {
     }
   });
 
+  test("a fresh codex worker that Herdr reads as done is ready for its prompt", async () => {
+    const box = codexSandbox();
+    try {
+      const { calls, exec } = scriptedExec({
+        ...happyPath(),
+        "agent get": getStatus("working"),
+      });
+      await dispatch({ ...options, kind: "codex" }, box.env, exec);
+      const settle = calls.find((args) => commandKey(args) === "agent wait");
+      expect(settle).toContain("done");
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
+  test("a codex worker still reading done after the prompt has not received it", async () => {
+    const box = codexSandbox();
+    try {
+      const { calls, exec } = scriptedExec({
+        ...happyPath(),
+        "agent get": getStatus("done"),
+        "agent read": welcomeScreen,
+        "pane close": closeOk,
+      });
+      await expect(
+        dispatch(
+          { ...options, kind: "codex" },
+          { ...box.env, PSTACK_HERDR_DELIVERY_WINDOW_MS: "0" },
+          exec
+        )
+      ).rejects.toThrow(/was not delivered/);
+      expect(
+        calls.filter((args) => commandKey(args) === "agent prompt")
+      ).toHaveLength(2);
+      expect(calls.at(-1)).toEqual(["pane", "close", "w1:p2"]);
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
   test("a codex prompt its rollout records is delivered even while Herdr reads unknown", async () => {
     const box = codexSandbox();
     try {
@@ -1567,5 +1611,394 @@ describe("herdr-dispatch codex turns", () => {
     } finally {
       rmSync(box.root, { recursive: true, force: true });
     }
+  });
+});
+
+const workerGet = (
+  name: string,
+  pane: string,
+  status: string,
+  kind = "claude"
+): CommandResult =>
+  jsonResult({
+    id: "cli:agent:get",
+    result: {
+      agent: { agent: kind, agent_status: status, name, pane_id: pane },
+    },
+  });
+
+// One status per `agent get`, per worker; the last one repeats.
+function workerStatuses(workers: Record<string, [string, ...string[]]>) {
+  const panes = Object.fromEntries(
+    Object.keys(workers).map((name, index) => [name, `w1:p${index + 10}`])
+  );
+  const reads: Record<string, number> = {};
+  return {
+    panes,
+    get: (args: string[]) => {
+      const name = args[2];
+      const statuses = workers[name];
+      if (!statuses) return failed('{"error":{"code":"agent_not_found"}}');
+      const at = reads[name] ?? 0;
+      reads[name] = at + 1;
+      return workerGet(
+        name,
+        panes[name],
+        statuses[Math.min(at, statuses.length - 1)]
+      );
+    },
+  };
+}
+
+// A status watch that wakes at once and records the cadence it was asked for.
+function fakeWatch(live = true) {
+  const waits: number[] = [];
+  let watched: string[] = [];
+  let closed = false;
+  const watch = async (panes: string[]): Promise<StatusWatch> => {
+    watched = panes;
+    return {
+      live,
+      changed: async (ms) => {
+        waits.push(ms);
+      },
+      close: () => {
+        closed = true;
+      },
+    };
+  };
+  return {
+    watch,
+    waits,
+    watched: () => watched,
+    closed: () => closed,
+  };
+}
+
+const nextOptions = {
+  names: ["alpha", "beta"],
+  keepPane: false,
+  timeout: 60000,
+  routes: emptyRoutes,
+};
+
+describe("herdr-dispatch next", () => {
+  test("returns the first worker to finish, read and closed, and leaves the rest pending", async () => {
+    const workers = workerStatuses({
+      alpha: ["working", "working", "working", "done"],
+      beta: ["working"],
+    });
+    const { calls, exec } = scriptedExec({
+      "agent get": workers.get,
+      "agent read": readOk,
+      "pane close": closeOk,
+    });
+    const watch = fakeWatch();
+    const result = await next(nextOptions, herdrEnv, exec, watch.watch);
+    expect(result).toEqual({
+      settled: [
+        {
+          agent: "alpha",
+          pane: "w1:p10",
+          kind: "claude",
+          status: "done",
+          blocked: false,
+          paneClosed: true,
+          output: "worker output",
+        },
+      ],
+      pending: ["beta"],
+    });
+    expect(watch.watched()).toEqual(["w1:p10", "w1:p11"]);
+    expect(watch.waits.length).toBe(2);
+    expect(watch.closed()).toBe(true);
+    expect(calls.filter((args) => commandKey(args) === "pane close")).toEqual([
+      ["pane", "close", "w1:p10"],
+    ]);
+  });
+
+  test("collects every worker that has settled by the same check", async () => {
+    const workers = workerStatuses({ alpha: ["done"], beta: ["idle"] });
+    const { exec } = scriptedExec({
+      "agent get": workers.get,
+      "agent read": readOk,
+      "pane close": closeOk,
+    });
+    const result = await next(nextOptions, herdrEnv, exec, fakeWatch().watch);
+    expect(result.settled.map((entry) => entry.agent)).toEqual([
+      "alpha",
+      "beta",
+    ]);
+    expect(result.pending).toEqual([]);
+  });
+
+  test("a blocked worker counts as settled and stays open", async () => {
+    const workers = workerStatuses({ alpha: ["blocked"], beta: ["working"] });
+    const { calls, exec } = scriptedExec({
+      "agent get": workers.get,
+      "agent read": textResult("Allow this command?\n"),
+    });
+    const result = await next(nextOptions, herdrEnv, exec, fakeWatch().watch);
+    expect(result).toMatchObject({
+      settled: [
+        { agent: "alpha", status: "blocked", blocked: true, paneClosed: false },
+      ],
+      pending: ["beta"],
+    });
+    expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("a budget that ends with nothing settled leaves every worker open", async () => {
+    const workers = workerStatuses({ alpha: ["working"], beta: ["unknown"] });
+    const { calls, exec } = scriptedExec({ "agent get": workers.get });
+    const watch = fakeWatch();
+    const result = await next(
+      { ...nextOptions, timeout: 0 },
+      herdrEnv,
+      exec,
+      watch.watch
+    );
+    expect(result).toEqual({ settled: [], pending: ["alpha", "beta"] });
+    expect(watch.waits).toEqual([]);
+    expect(calls.some((args) => commandKey(args) === "pane close")).toBe(false);
+  });
+
+  test("a name Herdr cannot find is reported at once, without watching", async () => {
+    const workers = workerStatuses({ alpha: ["working"] });
+    const { exec } = scriptedExec({ "agent get": workers.get });
+    const watch = fakeWatch();
+    const result = await next(nextOptions, herdrEnv, exec, watch.watch);
+    expect(result.pending).toEqual(["alpha"]);
+    expect(result.settled).toHaveLength(1);
+    expect(result.settled[0]).toMatchObject({ agent: "beta" });
+    expect((result.settled[0] as { error: string }).error).toMatch(
+      /agent_not_found/
+    );
+    expect(watch.watched()).toEqual([]);
+  });
+
+  test("a live watch waits for a status change; without one it reads every second", async () => {
+    const workers = () =>
+      workerStatuses({
+        alpha: ["working", "working", "done"],
+        beta: ["working"],
+      });
+    const run = async (live: boolean) => {
+      const { exec } = scriptedExec({
+        "agent get": workers().get,
+        "agent read": readOk,
+        "pane close": closeOk,
+      });
+      const watch = fakeWatch(live);
+      await next(
+        { ...nextOptions, timeout: 600000 },
+        herdrEnv,
+        exec,
+        watch.watch
+      );
+      return watch.waits;
+    };
+    const [live] = await run(true);
+    const [fallback] = await run(false);
+    expect(live).toBeGreaterThan(1000);
+    expect(fallback).toBe(1000);
+  });
+
+  test("next finishes a codex worker from the turn its dispatch recorded", async () => {
+    const box = codexSandbox();
+    try {
+      let typed = "";
+      const handed = scriptedExec({
+        ...happyPath(),
+        "agent prompt": promptedWith((prompt) => {
+          typed = prompt;
+          box.rollout("w", startedLine, askedLine(prompt));
+        }),
+        "agent get": getStatus("working"),
+      });
+      await dispatch(
+        { ...options, name: "alpha", kind: "codex" },
+        box.env,
+        handed.exec
+      );
+      let gets = 0;
+      const { exec } = scriptedExec({
+        "agent get": () => {
+          if (gets++ === 1)
+            box.rollout(
+              "w",
+              startedLine,
+              askedLine(typed),
+              completeLine("LGTM")
+            );
+          return workerGet("alpha", "w1:p2", "unknown", "codex");
+        },
+        "pane close": closeOk,
+      });
+      const watch = fakeWatch();
+      const result = await next(
+        { ...nextOptions, names: ["alpha"] },
+        box.env,
+        exec,
+        watch.watch
+      );
+      expect(result).toEqual({
+        settled: [
+          {
+            agent: "alpha",
+            pane: "w1:p2",
+            kind: "codex",
+            status: "done",
+            blocked: false,
+            paneClosed: true,
+            output: "LGTM",
+          },
+        ],
+        pending: [],
+      });
+      expect(watch.waits).toEqual([1000]);
+    } finally {
+      rmSync(box.root, { recursive: true, force: true });
+    }
+  });
+
+  test("names passed as one string, as zsh passes an unsplit variable, are split", async () => {
+    const workers = workerStatuses({ alpha: ["working"], beta: ["working"] });
+    const { exec } = scriptedExec({ "agent get": workers.get });
+    const watch = fakeWatch();
+    const result = await next(
+      { ...nextOptions, names: ["alpha beta", "alpha"], timeout: 0 },
+      herdrEnv,
+      exec,
+      watch.watch
+    );
+    expect(result).toEqual({ settled: [], pending: ["alpha", "beta"] });
+  });
+
+  test("next refuses to run outside Herdr", async () => {
+    const { calls, exec } = scriptedExec({});
+    await expect(
+      next(nextOptions, {}, exec, fakeWatch().watch)
+    ).rejects.toThrow(/HERDR_ENV=1/);
+    expect(calls).toEqual([]);
+  });
+});
+
+// A stand-in Herdr socket that acknowledges one subscription, then runs `after`.
+async function fakeHerdrSocket(
+  reply: (request: unknown, write: (line: unknown) => void) => void
+) {
+  const dir = mkdtempSync(join(tmpdir(), "pstack-herdr-sock-"));
+  const path = join(dir, "herdr.sock");
+  const requests: unknown[] = [];
+  const server = createServer((socket) => {
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString();
+      for (let at; (at = buffer.indexOf("\n")) >= 0; ) {
+        const request = JSON.parse(buffer.slice(0, at));
+        buffer = buffer.slice(at + 1);
+        requests.push(request);
+        reply(request, (line) => socket.write(`${JSON.stringify(line)}\n`));
+      }
+    });
+  });
+  await new Promise<void>((done) => server.listen(path, done));
+  return {
+    env: { HERDR_ENV: "1", HERDR_SOCKET_PATH: path },
+    requests,
+    close: () => {
+      server.close();
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+describe("herdr-dispatch status watch", () => {
+  test("subscribes to each pane's status and wakes on a pushed change", async () => {
+    let push: (line: unknown) => void = () => {};
+    const herdr = await fakeHerdrSocket((request, write) => {
+      write({
+        id: (request as { id: string }).id,
+        result: { type: "subscription_started" },
+      });
+      push = write;
+    });
+    try {
+      const watch = await watchStatus(["w1:p1", "w1:p2"], herdr.env);
+      expect(watch.live).toBe(true);
+      expect(herdr.requests).toEqual([
+        {
+          id: "pstack-herdr-next",
+          method: "events.subscribe",
+          params: {
+            subscriptions: [
+              { type: "pane.agent_status_changed", pane_id: "w1:p1" },
+              { type: "pane.agent_status_changed", pane_id: "w1:p2" },
+            ],
+          },
+        },
+      ]);
+      const started = Date.now();
+      const woke = watch.changed(60000);
+      push({
+        event: "pane.agent_status_changed",
+        data: { pane_id: "w1:p2", workspace_id: "w1", agent_status: "done" },
+      });
+      await woke;
+      expect(Date.now() - started).toBeLessThan(5000);
+      watch.close();
+    } finally {
+      herdr.close();
+    }
+  });
+
+  test("a rejected subscription leaves the watch on its timer", async () => {
+    const herdr = await fakeHerdrSocket((request, write) =>
+      write({
+        id: (request as { id: string }).id,
+        error: { code: "pane_not_found", message: "no pane" },
+      })
+    );
+    try {
+      const watch = await watchStatus(["w1:p9"], herdr.env);
+      expect(watch.live).toBe(false);
+      const started = Date.now();
+      await watch.changed(20);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(15);
+      watch.close();
+    } finally {
+      herdr.close();
+    }
+  });
+
+  test("lost events end the live watch and wake the caller", async () => {
+    let push: (line: unknown) => void = () => {};
+    const herdr = await fakeHerdrSocket((request, write) => {
+      write({
+        id: (request as { id: string }).id,
+        result: { type: "subscription_started" },
+      });
+      push = write;
+    });
+    try {
+      const watch = await watchStatus(["w1:p1"], herdr.env);
+      const woke = watch.changed(60000);
+      push({
+        id: "pstack-herdr-next",
+        error: { code: "events_lost", message: "behind" },
+      });
+      await woke;
+      expect(watch.live).toBe(false);
+      watch.close();
+    } finally {
+      herdr.close();
+    }
+  });
+
+  test("without a Herdr socket path the watch runs on its timer", async () => {
+    const watch = await watchStatus(["w1:p1"], { HERDR_ENV: "1" });
+    expect(watch.live).toBe(false);
+    watch.close();
   });
 });

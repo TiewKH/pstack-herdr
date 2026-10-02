@@ -56,6 +56,8 @@ test('inside Herdr with herdr and bun on PATH the Agent tool is denied', () => {
   assert.ok(decision.permissionDecisionReason.includes(`${fx.bin}/bun ${fx.plugin}/skills/poteto-mode/scripts/herdr-dispatch.ts`));
   assert.ok(decision.permissionDecisionReason.includes(`${fx.plugin}/skills/poteto-mode/references/herdr-tools.md`));
   assert.match(decision.permissionDecisionReason, /restart Claude Code with PSTACK_HERDR_ALLOW_NATIVE_AGENT=1/);
+  assert.ok(decision.permissionDecisionReason.includes(`${fx.bin}/bun ${fx.plugin}/skills/poteto-mode/scripts/herdr-dispatch.ts --next <agent-name>`));
+  assert.match(decision.permissionDecisionReason, /never sleep and re-check/);
 });
 
 test('a bun that lives only in ~/.bun/bin is named by full path', () => {
