@@ -2,7 +2,7 @@
 
 [pstack](https://github.com/cursor/plugins/tree/main/pstack) for Claude Code and Codex, with delegated agents running as visible [Herdr](https://github.com/herdrdev/herdr) panes.
 
-This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the Claude Code and Codex port of Lauren Tan's pstack. It has 54 Agent Skills: 31 public skills and 23 `principle-*` leaves. The skill tree is synced against upstream `12d587d` from `cursor/plugins/pstack`.
+This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the Claude Code, Codex, and Pi port of Lauren Tan's pstack. It has 57 Agent Skills: 33 public skills and 24 `principle-*` leaves. The skill tree is synced against upstream `e43c7ee` from `cursor/plugins/pstack`.
 
 Inside Herdr (`HERDR_ENV=1`), workflows that delegate start real Claude Code or Codex workers in Herdr panes, routed by role. You can watch and answer each worker. Outside Herdr, the plugin behaves like pstack-claude.
 
@@ -24,7 +24,17 @@ codex plugin marketplace add TiewKH/pstack-herdr
 codex plugin add pstack@pstack-claude
 ```
 
-Run `setup-pstack` to change model defaults, set a reasoning effort per role (for example `arena runners: opus @xhigh, fable @max`, which Claude Code dispatches through the plugin's `pstack:effort-<level>` or `pstack:poteto-agent-<level>` agents; roles without a level keep the session's effort unless the sheet's `default effort` line names one), or turn automatic routing off. The plugin installs the routing hook on Claude Code and Codex; Codex asks you to trust it through `/hooks` before it runs. In Claude Code, use `/pstack:setup-pstack`. For skills-only installs and other runtimes, see [shared installation](docs/reference.md#shared-skills-installation).
+### Pi
+
+Run in your terminal:
+
+```shell
+pi install git:github.com/TiewKH/pstack-herdr
+```
+
+The package loads the skills and the pstack Pi extension, which adds the subagent, question, and wake-up tools the skills use, plus `/loop` and the routing instruction. Invoke a skill with `/skill:<name>`. Herdr delegation is verified from Claude Code and Codex coordinators only.
+
+Run `setup-pstack` to change model defaults, set a reasoning effort per role (for example `arena runners: opus @xhigh, fable @max`, which Claude Code dispatches through the plugin's `pstack:effort-<level>` or `pstack:poteto-agent-<level>` agents; roles without a level keep the session's effort unless the sheet's `default effort` line names one), or turn automatic routing off. The plugin installs the routing hook on Claude Code and Codex; Codex asks you to trust it through `/hooks` before it runs. On Pi the extension injects the same routing instruction. In Claude Code, use `/pstack:setup-pstack`. For skills-only installs and other runtimes, see [shared installation](docs/reference.md#shared-skills-installation).
 
 ## Use it with Herdr
 

@@ -5,7 +5,7 @@
 // nothing and fails when a committed copy is stale, so it cannot ship.
 //
 // Sources of truth:
-//   VERSION  -> the "version" field in the three plugin manifests
+//   VERSION  -> the "version" field in the plugin manifests and the Pi package.json
 //   CHANGES.md must carry a heading for the current VERSION (release completeness)
 //   each skill's frontmatter (name + description) defines the shared Agent
 //   Skills boundary consumed natively by Codex, Prime, opencode, and Gemini CLI
@@ -16,10 +16,11 @@
 //   user-invocable: false); a skill without a row or a row without a skill
 //   fails by name.
 //   plugins/pstack/models.json (the model policy: role defaults, diverse panel,
-//   available slugs, Codex equivalents)
+//   available slugs, and one block per RUNTIMES row: Codex equivalents, Pi IDs)
 //     -> each model-consuming skill's "## Models" and "## Reasoning effort" sections
 //     -> setup-pstack's Models section and override-sheet block, and interrogate's reviewer table
-//     -> the "## Model names" section of poteto-mode/references/codex-tools.md
+//     -> the "## Model names" section of each runtime's mapping file
+//        (poteto-mode/references/codex-tools.md, pi-tools.md)
 //     -> one effort agent pair per level in plugins/pstack/effort-agents/
 //   the Per-skill notes table in poteto-mode/references/codex-tools.md
 //     -> the Codex preamble under the first heading of each listed skill's SKILL.md,
@@ -36,7 +37,8 @@
 //
 // Also validated: .agents/plugins/marketplace.json points at a real plugin
 // directory whose Codex manifest name matches (it carries no version; Codex
-// reads the version from .codex-plugin/plugin.json).
+// reads the version from .codex-plugin/plugin.json), and the repo-root
+// package.json that makes the repo a Pi package lists paths that exist.
 
 import {
   existsSync,
@@ -52,19 +54,19 @@ import {
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { code, codeList, PLUGIN, RUNTIMES, SKILLS, validateCodexMarketplace, validatePiPackage } from "./runtimes.mjs";
 import { markdownFiles, pathIsInside, validateProsePaths, validateSkillsTree, walk } from "./validate-skills.mjs";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-const PLUGIN = "plugins/pstack";
-const SKILLS = `${PLUGIN}/skills`;
-const PROMPTS = `${PLUGIN}/.codex-plugin/prompts`;
 const EFFORT_AGENTS = `${PLUGIN}/effort-agents`;
+const PROMPT_RUNTIMES = RUNTIMES.filter((runtime) => runtime.prompts);
 
 const VERSIONED_MANIFESTS = [
   ".claude-plugin/marketplace.json",
   "plugins/pstack/.claude-plugin/plugin.json",
   "plugins/pstack/.codex-plugin/plugin.json",
+  "package.json",
 ];
 
 export const PORTABLE_ASSETS = [
@@ -83,7 +85,7 @@ export const PORTABLE_ASSETS = [
 // The generator removes every entry of these directories that no planned path
 // runs through, so no hand-written file may live in one.
 export const OWNED_DIRS = [
-  PROMPTS,
+  ...PROMPT_RUNTIMES.map((runtime) => runtime.prompts),
   EFFORT_AGENTS,
   `${SKILLS}/poteto-mode/references/agents`,
   `${SKILLS}/poteto-mode/references/licenses`,
@@ -111,24 +113,6 @@ export function assertChangesHeading(changelog, version) {
   const malformed = lines.filter((line) => /^## \d+\.\d+\.\d+/.test(line) && !/^## \d+\.\d+\.\d+ - \S/.test(line));
   if (malformed.length) {
     throw new Error(`CHANGES.md release headings read "## <version> - <title>":\n${malformed.join("\n")}`);
-  }
-}
-
-export function validateCodexMarketplace(text, { expectedName, pathExists }) {
-  const manifest = JSON.parse(text);
-  const plugins = manifest.plugins ?? [];
-  if (plugins.length !== 1) {
-    throw new Error(`.agents/plugins/marketplace.json: expected 1 plugin entry, found ${plugins.length}`);
-  }
-  const [plugin] = plugins;
-  if (plugin.name !== expectedName) {
-    throw new Error(
-      `.agents/plugins/marketplace.json: plugin name "${plugin.name}" != Codex manifest name "${expectedName}"`,
-    );
-  }
-  const path = plugin.source?.path;
-  if (!path || !pathExists(path)) {
-    throw new Error(`.agents/plugins/marketplace.json: source.path "${path}" does not resolve to a directory`);
   }
 }
 
@@ -282,9 +266,6 @@ export function promptStub({ name, menu }, { preamble } = {}) {
   );
 }
 
-const code = (s) => `\`${s}\``;
-const codeList = (models) => models.map(code).join(", ");
-
 // Locators find a generator-owned span of a file and return its [start, end)
 // line range, or null when the anchor is absent. The same locator serves the
 // stamp (splice the rendered lines in) and the stray-slug scan (skip the
@@ -376,43 +357,44 @@ export function regions(models) {
       locate: fenceUnder("Write the override sheet", "markdown"),
       render: () => [overrideSheetBlock(models)],
     },
-    {
-      file: "plugins/pstack/skills/poteto-mode/references/codex-tools.md",
+    ...RUNTIMES.map((runtime) => ({
+      file: runtime.tools,
       name: "Model names section",
       locate: section("Model names"),
-      render: () => blankPadded(codexModelNamesSection(models)),
-    },
+      render: () => blankPadded(runtime.modelNames(models)),
+    })),
   ];
 }
 
-const CODEX_TOOLS = `${SKILLS}/poteto-mode/references/codex-tools.md`;
-const CODEX_NOTES_HEADER = "| Skill | On Codex |";
-const CODEX_PREAMBLE =
-  "On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill.";
+const PREAMBLE_RUNTIMES = RUNTIMES.filter((runtime) => runtime.preamble);
 const DRIVER_LINE = "Resolve the driver skill through [poteto-mode's Non-negotiables](../SKILL.md#non-negotiables).";
 const DRIVER_PLAYBOOKS = ["autopilot-full", "multi-phase-plan", "orchestrate", "refactoring", "shipping"];
+const LEAD_LINES = [...PREAMBLE_RUNTIMES.map((runtime) => runtime.preamble), DRIVER_LINE];
 
-// The skills with a row in the Codex mapping's Per-skill notes table, in row order.
-export function codexNoteSkills(markdown) {
+// The skills with a row in a runtime mapping's Per-skill notes table, in row order.
+export function noteSkills(runtime, markdown) {
   const lines = markdown.split("\n");
-  const range = tableRows(CODEX_NOTES_HEADER, "| ")(lines);
-  if (!range) throw new Error(`${CODEX_TOOLS}: "${CODEX_NOTES_HEADER}" table header not found`);
+  const range = tableRows(runtime.notesHeader, "| ")(lines);
+  if (!range) throw new Error(`${runtime.tools}: "${runtime.notesHeader}" table header not found`);
   return lines.slice(...range).map((row) => {
     const skill = row.match(/^\| `([a-z0-9-]+)` \|/)?.[1];
-    if (!skill) throw new Error(`${CODEX_TOOLS}: Per-skill notes row does not start with a backticked skill: ${row}`);
+    if (!skill) throw new Error(`${runtime.tools}: Per-skill notes row does not start with a backticked skill: ${row}`);
     return skill;
   });
 }
 
 // The line the generator owns under a file's first heading, by repo-relative
-// file: the Codex preamble on each skill the Per-skill notes table has a row
-// for, and the driver-skill line on the playbooks that drive an app.
+// file: a runtime's preamble on each skill its Per-skill notes table has a row
+// for, and the driver-skill line on the playbooks that drive an app. Every
+// runtime's table must name real skills, whether or not it stamps a preamble.
 export function loadLeadLines(root = repo) {
   const leads = new Map();
-  for (const skill of codexNoteSkills(readFileSync(join(root, CODEX_TOOLS), "utf8"))) {
-    const file = `${SKILLS}/${skill}/SKILL.md`;
-    if (!existsSync(join(root, file))) throw new Error(`${CODEX_TOOLS}: per-skill note for "${skill}", which has no SKILL.md`);
-    leads.set(file, CODEX_PREAMBLE);
+  for (const runtime of RUNTIMES) {
+    for (const skill of noteSkills(runtime, readFileSync(join(root, runtime.tools), "utf8"))) {
+      const file = `${SKILLS}/${skill}/SKILL.md`;
+      if (!existsSync(join(root, file))) throw new Error(`${runtime.tools}: per-skill note for "${skill}", which has no SKILL.md`);
+      if (runtime.preamble) leads.set(file, runtime.preamble);
+    }
   }
   for (const playbook of DRIVER_PLAYBOOKS) leads.set(`${SKILLS}/poteto-mode/playbooks/${playbook}.md`, DRIVER_LINE);
   return leads;
@@ -474,9 +456,10 @@ export function parseModels(raw, skillExists) {
       seen.add(item);
     }
   };
+  const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
   for (const key of ["available", "efforts", "roles"]) if (!Array.isArray(raw[key])) fail(`"${key}" must be a list`);
-  for (const key of ["tiers", "codex"]) {
-    if (!raw[key] || typeof raw[key] !== "object") fail(`"${key}" must be an object`);
+  for (const key of ["tiers", ...RUNTIMES.map((runtime) => runtime.key)]) {
+    if (!isObject(raw[key])) fail(`"${key}" must be an object`);
   }
   const available = new Set(raw.available);
   unique(raw.available, "available");
@@ -516,13 +499,7 @@ export function parseModels(raw, skillExists) {
   if (!raw.efforts.includes(raw.defaultEffort) && raw.defaultEffort !== "session") {
     fail(`defaultEffort "${raw.defaultEffort}" is not an effort level or "session"`);
   }
-  for (const tier of Object.keys(raw.tiers)) {
-    if (!Object.hasOwn(raw.codex, tier)) fail(`codex has no example for tier "${tier}"`);
-  }
-  for (const [tier, value] of Object.entries(raw.codex)) {
-    if (!Object.hasOwn(raw.tiers, tier)) fail(`codex names "${tier}", which is not a tier`);
-    unique([value].flat(), `codex "${tier}"`);
-  }
+  for (const runtime of RUNTIMES) runtime.checkModels(raw[runtime.key], { raw, fail, unique, isObject });
   return resolveModels(raw);
 }
 
@@ -705,23 +682,6 @@ export function overrideSheetBlock(models) {
   );
 }
 
-export function codexModelNamesSection(models) {
-  const strongest = models.roles.filter((r) => r.tier === "strongest");
-  return (
-    "Skills name Claude defaults (a single-role default for code/prose/judgment plus a diverse-model panel for " +
-    "diverse-model panels; each model-consuming skill lists its own in a Models section). These slugs do not " +
-    "resolve on Codex. Substitute your configured Codex models:\n\n" +
-    `- Single-model roles: your primary Codex model (for example ${code(models.codex.default)}).\n` +
-    `- Roles that default to the strongest Claude model (${strongest.map((r) => code(r.role)).join(", ")}): ` +
-    `your strongest Codex model (for example ${code(models.codex.strongest)}).\n` +
-    "- Diverse-model panels (`arena`, `architect`, `interrogate`, `how` critics, `reflect`): the adversarial " +
-    "signal comes from model diversity, so use the distinct Codex models available to you. A good default panel " +
-    `on ChatGPT is ${codeList(models.codex.panel)}. If only one model family is reachable, vary reasoning ` +
-    "effort and note in the verdict that diversity was reduced.\n\n" +
-    "`/setup-pstack` writes the configured model list. On Codex, set it to your Codex model slugs."
-  );
-}
-
 // After stamping, skill prose outside the regions the generator owns may name
 // no model: a full claude-* ID is rejected by the Agent tool, and a backticked
 // family name hard-codes a default that belongs in models.json.
@@ -750,17 +710,23 @@ export function validateHooks(hooksJson, { statOf, file = "hooks/hooks.json" }) 
   for (const [event, groups] of Object.entries(JSON.parse(hooksJson).hooks ?? {})) {
     for (const group of groups) {
       for (const hook of group.hooks ?? []) {
-        const refs = [...hook.command.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([^"\s]+)/g)].map((m) => m[1]);
-        if (!refs.length) {
-          faults.push(`${event}: command does not reference \${CLAUDE_PLUGIN_ROOT}: ${hook.command}`);
+        if (typeof hook.command !== "string") {
+          faults.push(`${event}: a hook has no command`);
           continue;
         }
-        const executed = hook.command.replace(/^"/, "").startsWith("${CLAUDE_PLUGIN_ROOT}/");
-        refs.forEach((rel, i) => {
-          const st = statOf(rel);
-          if (!st) faults.push(`${event}: ${rel} does not exist`);
-          else if (i === 0 && executed && !(st.mode & 0o111)) faults.push(`${event}: ${rel} is not executable`);
-        });
+        for (const command of [hook.command, hook.commandWindows].filter((value) => value !== undefined)) {
+          const refs = [...command.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([^"\s]+)/g)].map((m) => m[1]);
+          if (!refs.length) {
+            faults.push(`${event}: command does not reference \${CLAUDE_PLUGIN_ROOT}: ${command}`);
+            continue;
+          }
+          const executed = command.replace(/^"/, "").startsWith("${CLAUDE_PLUGIN_ROOT}/");
+          refs.forEach((rel, i) => {
+            const st = statOf(rel);
+            if (!st) faults.push(`${event}: ${rel} does not exist`);
+            else if (i === 0 && executed && !(st.mode & 0o111)) faults.push(`${event}: ${rel} is not executable`);
+          });
+        }
       }
     }
   }
@@ -800,9 +766,11 @@ export function plan(root, models) {
       return stamped;
     });
   }
-  for (const skill of slashCommands(read(COMMANDS_DOC), publicSkills(join(root, SKILLS)))) {
-    const preamble = leads.get(`${SKILLS}/${skill.name}/SKILL.md`) === CODEX_PREAMBLE;
-    put(`${PROMPTS}/${skill.name}.md`, promptStub(skill, { preamble }));
+  for (const runtime of PROMPT_RUNTIMES) {
+    for (const skill of slashCommands(read(COMMANDS_DOC), publicSkills(join(root, SKILLS)))) {
+      const preamble = leads.get(`${SKILLS}/${skill.name}/SKILL.md`) === runtime.preamble;
+      put(`${runtime.prompts}/${skill.name}.md`, promptStub(skill, { preamble }));
+    }
   }
   const agents = effortAgents(models.efforts, read(`${PLUGIN}/agents/poteto-agent.md`));
   for (const agent of agents) put(`${EFFORT_AGENTS}/${agent.name}.md`, agent.text);
@@ -923,13 +891,14 @@ export function problems(root, models) {
       return readFileSync(full, "utf8")
         .split("\n")
         .flatMap((line, i) =>
-          [CODEX_PREAMBLE, DRIVER_LINE].includes(line) && leads.get(file) !== line ? [`${file}:${i + 1}`] : [],
+          LEAD_LINES.includes(line) && leads.get(file) !== line ? [`${file}:${i + 1}`] : [],
         );
     });
     if (strays.length) {
       throw new Error(
-        "generator-owned lead lines outside their files (a Codex preamble needs a row in the Per-skill notes " +
-          `table of ${CODEX_TOOLS}; the driver-skill line belongs to DRIVER_PLAYBOOKS):\n${strays.join("\n")}`,
+        "generator-owned lead lines outside their files (a runtime preamble needs a row in the Per-skill notes " +
+          `table of ${PREAMBLE_RUNTIMES.map((r) => r.tools).join(" or ")}; the driver-skill line belongs to DRIVER_PLAYBOOKS):\n` +
+          strays.join("\n"),
       );
     }
   });
@@ -943,6 +912,11 @@ export function problems(root, models) {
       }),
     );
   }
+  attempt(() =>
+    validatePiPackage(readFileSync(join(root, "package.json"), "utf8"), {
+      pathExists: (p) => existsSync(join(root, p)),
+    }),
+  );
   attempt(() => validatePluginLayout(pluginRoot));
   attempt(() => validateAgentFrontmatter(pluginRoot));
   for (const file of ["hooks/hooks.json", ...(codexManifest ? [codexManifest.hooks] : [])]) {
@@ -974,7 +948,7 @@ function main() {
   if (pending?.length === 0) console.log(`ok: ${Object.keys(intended.files).length} generated files current`);
   for (const failure of failures) console.error(`FAIL: ${failure}`);
   if (failures.length) process.exit(1);
-  console.log("ok: skill links, prose paths, model slugs, marketplace, plugin layout, agent frontmatter, and hooks pass their checks");
+  console.log("ok: skill links, prose paths, model slugs, marketplace, Pi package, plugin layout, agent frontmatter, and hooks pass their checks");
 }
 
 // Guarded so importing the generator's validation and rendering functions does

@@ -2,6 +2,96 @@
 
 This file is the release changelog, with one `## <version> - <title>` entry per release, newest first. The Cursor-to-Claude rewrite rules live in [`tools/substitutions.json`](tools/substitutions.json), and the [sync boundary](CONTRIBUTING.md#the-sync-boundary) in `CONTRIBUTING.md` defines how a change to upstream's skill content is declared.
 
+## 0.9.70 - pstack-herdr: merge pstack-claude 0.9.69
+
+This release merges `michael-denyer/pstack-claude` 0.9.58 through 0.9.69 into the fork. It brings in the Pi package and extension, the `/correct` skill and the `cursor/plugins` pin at `e43c7ee` (v0.15.9), the Windows Codex `SessionStart` hook, hook validation that requires a `command`, BOM-tolerant plan, playbook and sheet readers, Codex sessions in `worktree-audit`, and child processes that no longer inherit the whole environment. The fork keeps the Herdr dispatcher, `--next`, the Agent gate, and routes. Upstream did not touch any of them, and `/correct` does not delegate.
+
+To keep the Herdr runtime and the fork's workflow safety:
+
+- `models.json` carries both the fork's `herdr` menu and upstream's `pi` block. Platform Adaptation in `poteto-mode` keeps the `HERDR_ENV=1` pointer beside the new Pi pointer.
+- CI keeps the real Herdr dispatch job and runs upstream's Windows hooks and fork registry jobs next to it. Each new job gets a 10-minute limit. The actionlint, lychee, and OSV mounts move from `$PWD` to `$GITHUB_WORKSPACE`, as upstream did, and stay read-only.
+- `tools/forks.json` declares the Herdr pointer in `arena`, `automate-me`, `how`, `interrogate`, `maintain-verification-skill`, `no-comments`, `swarm`, and `why`. The registry job's dry-run sync otherwise fails on them. The existing `poteto-mode`, `recall`, `reflect`, and `show-me-your-work` entries now name the pointer too.
+- The Claude `plugin.json` drops `icon`, following upstream's plugin directory fix. The Codex manifest still uses `assets/pstack-icon.png`.
+- The README adds Pi installation from this fork and updates the skill counts and upstream pin.
+
+Both lines released their own 0.9.58 and 0.9.59, so the version moves to 0.9.70. Upstream's entries follow under their own versions. Merge this release with a merge commit, not a squash, so the next sync starts from `ad396c2`.
+
+### pstack-claude 0.9.69 - hook validation names a missing command
+
+`tools/generate.mjs` reports a hook with no `command` as a fault. Since the `commandWindows` override landed in 0.9.66, such a hook passed validation with nothing checked, including one that carried only a Windows override and so ran nowhere else.
+
+### pstack-claude 0.9.68 - resume links with parentheses, BOM-led plans, Codex sessions in the worktree audit, and Pi fixes
+
+Resume checkpoint publication now accepts Markdown angle-bracket destinations such as `[Questions](<questions (draft).md>)`. A linked local file still has to be registered with `--artifact`. A CLI regression test covers publication and a subsequent read.
+
+`check-plan.mjs` and `check-playbooks.mjs` strip a leading UTF-8 byte-order mark, so a plan or project playbook saved by an editor that adds one no longer fails with a missing title, a missing `when:` line, or frontmatter linted as prose.
+
+`worktree-audit.mjs` scans Codex's `sessions` and `archived_sessions` under `$CODEX_HOME` (default `~/.codex`) and honours `$CLAUDE_CONFIG_DIR`, so a worktree with a recent Codex session lands in `verify-recent-chat` instead of `safe`. It matches a worktree path as JSONL spells it, which covers Windows backslash and forward-slash spellings, UNC paths, and paths with escaped characters, without matching a sibling that shares the prefix.
+
+In Pi, starting a new `/loop` cancels the previous loop's pending wakeup in both modes, so an old self-paced prompt no longer fires after a replacement. A sheet the user cannot read leaves the defaults in place instead of failing session start or an agent launch, and the shared sheet table in `tests/session-hook-sheets.mjs` now holds every hook to that case. A retained agent worktree is checked before reuse and cleanup: a plain directory, a link, an unrelated repository, or an unregistered gitdir at that path is refused, and its files are left alone, so an isolated agent can no longer run in the parent checkout.
+
+`tools/forks.json` drops the stale `watch-pr/transport.test.ts` entry that the sync dry-run warned about.
+
+### pstack-claude 0.9.67 - session hook sheet parity
+
+The POSIX hook, the PowerShell hook, and Pi now read the sheet the same way in two more cases. A `session hook: off` line after a UTF-8 byte-order mark counts as off, which covers sheets saved by editors that add one. A sheet that exists but cannot be read as a file leaves the hook on, the same as a missing sheet, instead of failing the PowerShell hook or printing an error from the POSIX one. Both cases join the shared table in `tests/session-hook-sheets.mjs`. The Windows CI job's test timeout drops from 60 to 10 seconds, so a return of the slow PowerShell start fails the job.
+
+### pstack-claude 0.9.66 - Windows Codex SessionStart hook
+
+The Codex plugin's `SessionStart` hook now runs on Windows. `codex-hooks.json` adds a `commandWindows` override that runs `session-start.ps1` through PowerShell, so Windows Codex loads the routing instruction without Bash (#171). Windows users must trust the changed hook again through `/hooks`.
+
+`session-start.sh` now treats a `session hook: off` line with CRLF endings as off, matching the PowerShell adapter and Pi. One table in `tests/session-hook-sheets.mjs` holds the off-switch cases, and the POSIX hook, the PowerShell adapter, and Pi's sheet parser all run against it. A new Windows CI job runs the adapter's tests and fails instead of skipping if they do not run.
+
+### pstack-claude 0.9.65 - sync to upstream e43c7ee (v0.15.9)
+
+The upstream pin moves from `23e4138` to `e43c7ee`, upstream v0.15.9, three commits. The first adds the `/correct` skill. It finds the mistakes agents keep repeating in a repo and fixes each class at the highest level that works: architecture first, then types and lint, then a test, with docs last. The package now carries 33 public skills and 24 principles.
+
+`architect` now screens candidates on the assumption that the next contributor is an agent that sees only the files it opened and copies the nearest example. `design-red-flags.md` gains four red flags: split ownership, two ways to do one task, importable internals, and a hand-synced list. The Perf issue playbook replaces its eight strategy families with seven performance mantras tried in order, cheapest first, and stops at the first one that meets the target. Hillclimb orders perf hypotheses by those mantras, and `benchmark-checklist` points at them.
+
+Measured with `bun tools/sync.mjs pstack e43c7ee`: 4 files updated clean, 1 added, 1 merged three-way (`architect/SKILL.md`), 76 unchanged, 36 excluded, and no conflicts. The new upstream text carries no Cursor-only terms, so `tools/substitutions.json` is unchanged. No file became port-only.
+
+### pstack-claude 0.9.64 - sync to upstream 23e4138 (v0.15.6)
+
+The upstream pin moves from `12d587d` to `23e4138`, upstream v0.15.6, one commit. It adds the `benchmark-checklist` skill and the `principle-explain-the-number` principle, which together vet a measured speedup or regression before anyone reports or acts on it. `poteto-mode` triggers `benchmark-checklist` on a benchmark and indexes the new principle, so the package now carries 32 public skills and 24 principles.
+
+Subagents are fresh by default. A fix round, a follow-up, a retry, and the next queue item go to a new agent with the consolidated brief. A resume is reserved for work that needs state living in the old agent, such as its checkout, uncommitted changes, or a running process. The autopilots hand each next queue item to a fresh owner, owners push after every verifiable unit, and the audit tick judges an owner by its pushed branch and decision trail. The audit tick runs every hour instead of every 30 minutes, and `check-plan.mjs` pins the new cadence. Opening a PR names the run's built-in PR tool first, and the playbooks gain a "Size and stacks" paragraph. Operator-facing defaults under a full-autonomy grant are reported in plain words, with no shorthand token to type back. `technical-writing` drops its fetch-date source lines, and `typescript-best-practices` takes upstream's schema-first reference edits.
+
+Measured with `bun tools/sync.mjs pstack 23e4138`: 6 files updated clean, 2 added, 1 merged three-way, 72 unchanged, 36 excluded, and 5 conflicted files resolved by hand. The conflicts are `SKILL.md`, `autopilot-full.md`, `autopilot-stack.md`, `multi-phase-plan.md`, and `check-plan.mjs`. The sync's denylist rejects the `control-cli` and `control-ui` lines that those conflicts carry, so the run excluded the five paths and the edits were applied by hand afterward.
+
+Port policy is unchanged where it diverges from upstream. The autopilots stop at merge-ready for the operator's click, so the upstream rule that skips a second rebase before the owner's own merge is not ported. The `/goal` removals already matched the port, which never armed one.
+
+### pstack-claude 0.9.63 - the description starts with a capital
+
+The plugin description in every manifest starts with "If" instead of "if".
+
+### pstack-claude 0.9.62 - no author email in the manifests
+
+The Claude and Codex plugin manifests, the marketplace, and `package.json` name the author and link to the GitHub profile, without an email address.
+
+### pstack-claude 0.9.61 - Pi agents learn their depth from a flag
+
+The Pi extension passed each agent it started a copy of the session's environment with `PSTACK_PI_DEPTH` added, the last place the plugin handed a copy of the whole environment to a child process. Agents now inherit the environment unchanged, and the extension registers a `--pstack-depth` flag that a parent passes to each agent it starts. An agent reads its depth from that flag. Depth limits and behaviour are unchanged.
+
+### pstack-claude 0.9.60 - orch and the watch-pr tests stop handing the whole environment to child processes
+
+The Claude plugin directory holds pstack with "Uses a credential from the user's machine". The orch store passed a copy of `process.env` to `gt` and `git`, and three test files passed one to the processes they start. The orch store now lets `gt` and `git` inherit the environment and strips colour codes from `gt` output, where it set `NO_COLOR` before. `openStore` takes a `gt` option, the path of the `gt` executable, which defaults to `gt`. The orch tests use it to run a fake `gt`, because Bun resolves a command that has no `env` option against the `PATH` it started with. The tests' child processes get only `PATH` and the variables each test sets. The Pi extension still passes `PSTACK_PI_DEPTH` to its child agents in a copy of the environment.
+
+The plugin folder has `.claude-plugin/icon.png`, the path the directory reads for the listing icon.
+
+### pstack-claude 0.9.59 - no `$PWD` in the repository and no listing fields in `plugin.json`
+
+The Claude plugin directory validator reads `$PWD` as a credential-named variable and holds a plugin when a file that names it also names a remote URL. The shared-skills and Codex prompt install loops in `docs/reference.md` link with `$(pwd)`, the CI and Security workflows mount `$GITHUB_WORKSPACE`, and the skills-only CI job installs `./plugins/pstack/skills`. Each resolves to the same path as before.
+
+The Claude `plugin.json` no longer carries `icon`, `documentationUrl`, `supportUrl`, `privacyPolicyUrl`, or `termsOfServiceUrl`. Claude Code ignores all five at load time, and the validator reports each one as a finding. `assets/pstack-icon.png` stays for the Codex manifest.
+
+### pstack-claude 0.9.58 - run pstack on Pi
+
+pstack now installs on [Pi](https://pi.dev) 1.0 with `pi install` and behaves on Pi as it does on Claude Code. The repository root is a Pi package that loads the shared skills tree and a Pi extension, `plugins/pstack/pi/`, which supplies what Pi lacks under the Claude Code names the skills already use. `agent` runs each subagent as a child `pi --mode rpc` process with the role's model, effort, and agent file, in the foreground or background, optionally in its own git worktree. `send_message`, `list_agents`, and `stop_agent` message, list, and stop those agents, and an agent's status follows its process, so `completed` always means it exited. A message to a running agent is an RPC `steer` on the child's stdin, which the agent reads after its current tool calls, as on Claude Code, so the agent carries on in the same run and reports once. A message to a finished agent resumes it, and a message that arrives after the agent settled resumes it once its process has exited. `ask_user_question`, `schedule_wakeup`, and `/loop` match `AskUserQuestion`, `ScheduleWakeup`, and the `loop` skill. A `schedule_wakeup` call with `noop: true` still schedules, and `stop: true` cancels the pending wakeup and needs no other field. At every agent start the extension adds the routing instruction and the override sheet to the system prompt, so both survive compaction, and `session hook: off` drops the instruction as on Claude Code. In `pi -p` runs the extension holds the run open until each background agent's notice has run as a turn, and a child agent holds its own settle the same way while its background agents run. `readonly: true` runs an agent without the `edit` and `write` tools. A background agent's notice joins the running turn after its current tool calls, as on Claude Code, so the lead sees a result before it writes its reply. Agents can start agents down to three layers below the main session, and the third layer runs without `agent`, as on Claude Code. Quitting, reloading, or switching sessions stops every running agent, a parent process that exits signals its agents to stop, and a session start stops an agent whose launching `pi` process is gone. In `pi -p`, `/loop` runs its prompt as part of the one run, and scheduling a wakeup returns an error, because the run would end before the wakeup fired. In a child agent, scheduling a wakeup and `ask_user_question` return an error for the same reason and because a child has no user to ask. While a background agent runs, a `bash` line in which any command starts with a foreground `sleep` of two seconds or more is refused with a reminder that the agent's notice arrives on its own, because models otherwise polled with `sleep` and cut agents short. The system prompt also carries Claude Code's sentence on making independent tool calls in one response, which skills that start N agents in one message rely on.
+
+Family names resolve through a new `pi` block in `models.json` to model IDs for the provider the Pi session runs on. On a ChatGPT sign-in, `fable` is GPT-6 Astra, `opus` GPT-6.1 Sol, `sonnet` GPT-6 Sol, and `haiku` GPT-6 Luna, matching the tiers of the Codex defaults. Anthropic and any other provider get the Claude models. Pi warns that Anthropic bills Claude used through Pi per token, even on a Claude subscription, so the Pi docs say so and point Claude plan users at Claude Code. A `pi models:` line in the Pi override sheet, `~/.pi/agent/pstack-models.md`, remaps any family name. `poteto-mode/references/pi-tools.md` maps each Claude tool, model, and skill reference to its Pi equivalent, and `poteto-mode/SKILL.md` points at it once, so no other skill file carries a Pi line. The extension's system prompt carries the same pointer in every session, child agents included. The generator stamps the mapping's Model names table, writes the package version, validates the package manifest, and fails when a row of the mapping's Per-skill notes table names a skill that does not exist. `reflect/scripts/find-transcript.mjs` and `worktree-audit.mjs` read Pi session files, and `worktree-audit.mjs` names every transcripts directory that is missing, not only the first. `find-transcript.mjs` also splits lines on newlines only. It read through Node's `readline`, which breaks at U+2028 and U+2029, so a prompt containing either character was skipped on Claude Code too.
+
+`docs/pi-equivalence.md` lists the 62 Claude Code mechanisms pstack depends on and how Pi provides each one, and a test fails when a row cites a test that does not exist. Offline tests drive the extension against a fake `pi`, `tests/pi/catalog.test.mjs` checks the default model IDs against the installed Pi's catalog, which CI's `Pi extension types` job runs against the pinned release, and `PSTACK_PI_LIVE=1` runs `tests/pi/live.test.mjs` against real Pi. Every row that needs a live check passed it. The root `package.json` declares `typebox` and the optional `@earendil-works/pi-coding-agent` as peer dependencies, a root `bun.lock` pins `typebox`, and the CI job that runs `bun test tests/` first runs `bun install --frozen-lockfile`.
+
 ## 0.9.59 - pstack-herdr: merge pstack-claude 0.9.57
 
 This release merges `michael-denyer/pstack-claude` 0.9.54 through 0.9.57 into the fork: project playbooks under `.agents/playbooks/`, a `watch-pr` verdict for a PR with no checks, strict YAML in the effort agents' frontmatter, the opening-prompt fix in `reflect`'s transcript finder, and the contributing guide's rule that skill workflow changes land in this port. The `cursor/plugins` pin stays at `12d587d`. The version moves to 0.9.59 so installed copies on either line refresh, since both lines released their own 0.9.54 through 0.9.57. Upstream's entries follow under their own versions. Merge this release with a merge commit, not a squash, so the next sync starts from `92debb7`.
