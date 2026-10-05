@@ -20,12 +20,17 @@
 //     -> each model-consuming skill's "## Models" and "## Reasoning effort" sections
 //     -> setup-pstack's Models section and override-sheet block, and interrogate's reviewer table
 //     -> the "## Model names" section of each runtime's mapping file
-//        (poteto-mode/references/codex-tools.md, pi-tools.md)
+//        (poteto-mode/references/codex-tools.md, pi-tools.md, copilot-tools.md)
 //     -> one effort agent pair per level in plugins/pstack/effort-agents/
 //   the Per-skill notes table in poteto-mode/references/codex-tools.md
 //     -> the Codex preamble under the first heading of each listed skill's SKILL.md,
 //        and the codex-tools.md pointer in the prompt stub of every other public skill
+//   the Per-skill notes table in poteto-mode/references/copilot-tools.md
+//     -> the GitHub Copilot preamble under the same heading, after any Codex one
 //   DRIVER_PLAYBOOKS -> the driver-skill line under each playbook's first heading
+//   plugins/pstack/models.json's roles, again
+//     -> the role list in setup-pstack's scripts/sheet.awk, which checks a Copilot sheet
+//     -> the list of skills that dispatch on role models in hooks/session-start-copilot.md
 //   plugins/pstack/{agents,effort-agents}/*.md -> the "agents" list in
 //     plugins/pstack/.claude-plugin/plugin.json (a list replaces the default
 //     agents/ directory, so it names every agent)
@@ -57,7 +62,7 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 
 import { code, codeList, PLUGIN, SKILLS } from "./plugin.mjs";
-import { RUNTIMES } from "./runtimes.mjs";
+import { RUNTIMES, roleSkills } from "./runtimes.mjs";
 import { markdownFiles, pathIsInside, validateProsePaths, validateSkillsTree, walk } from "./validate-skills.mjs";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -306,7 +311,38 @@ export const tableRows = (header, rowPrefix) => (lines) => {
   return [start + 2, end];
 };
 
+// The lines strictly between the line `open` and the next line `close`.
+export const between = (open, close) => (lines) => {
+  const start = lines.indexOf(open);
+  if (start === -1) return null;
+  const end = lines.indexOf(close, start + 1);
+  return end === -1 ? null : [start + 1, end];
+};
+
+// The one line that starts with `prefix`.
+export const lineStartingWith = (prefix) => (lines) => {
+  const at = lines.findIndex((l) => l.startsWith(prefix));
+  return at === -1 ? null : [at, at + 1];
+};
+
 const blankPadded = (body) => ["", ...body.split("\n"), ""];
+
+const SHEET_ROLES_OPEN = "  # Stamped from plugins/pstack/models.json; edit there and rerun tools/generate.mjs.";
+const ROLE_SKILLS_LINE = "Skills that dispatch on role models:";
+
+// awk string literals: models.json role labels and effort levels hold no quote
+// or backslash, which parseModels does not check, so check here.
+function sheetRoles(models) {
+  const quote = (s) => {
+    if (/["\\]/.test(s)) throw new Error(`models.json: "${s}" cannot go in an awk string`);
+    return `"${s}"`;
+  };
+  return [
+    ...models.roles.map((r) => `  roles[++n] = ${quote(r.role)}`),
+    ...models.roles.filter((r) => r.tier === "panel").map((r) => `  panel[${quote(r.role)}] = 1`),
+    ...models.efforts.map((level) => `  SHEET_EFFORT[${quote(level)}] = 1`),
+  ];
+}
 
 function requiredRole(models, label) {
   const role = models.roles.find((r) => r.role === label);
@@ -366,6 +402,29 @@ export function regions(models) {
       locate: section("Model names"),
       render: () => blankPadded(runtime.modelNames(models)),
     })),
+    {
+      file: skillFile("setup-pstack").replace("SKILL.md", "scripts/sheet.awk"),
+      name: "role list",
+      locate: between(SHEET_ROLES_OPEN, "  return n"),
+      render: () => sheetRoles(models),
+    },
+    {
+      file: skillFile("setup-pstack").replace("SKILL.md", "copilot.md"),
+      name: "roles by tier",
+      locate: tableRows("| Tier | Roles |", "| "),
+      render: () =>
+        [
+          ["Default", "default"],
+          ["Strongest", "strongest"],
+          ["Panel", "panel"],
+        ].map(([label, tier]) => `| ${label} | ${models.roles.filter((r) => r.tier === tier).map((r) => code(r.role)).join(", ")} |`),
+    },
+    {
+      file: `${PLUGIN}/hooks/session-start-copilot.md`,
+      name: "role-model skill list",
+      locate: lineStartingWith(ROLE_SKILLS_LINE),
+      render: () => [`${ROLE_SKILLS_LINE} ${roleSkills(models).map(code).join(", ")}.`],
+    },
   ];
 }
 
@@ -386,32 +445,37 @@ export function noteSkills(runtime, markdown) {
   });
 }
 
-// The line the generator owns under a file's first heading, by repo-relative
-// file: a runtime's preamble on each skill its Per-skill notes table has a row
-// for, and the driver-skill line on the playbooks that drive an app. Every
-// runtime's table must name real skills, whether or not it stamps a preamble.
+// The lines the generator owns under a file's first heading, in order, by
+// repo-relative file: a runtime's preamble on each skill its Per-skill notes
+// table has a row for, in RUNTIMES order, and the driver-skill line on the
+// playbooks that drive an app. Every runtime's table must name real skills,
+// whether or not it stamps a preamble.
 export function loadLeadLines(root = repo) {
   const leads = new Map();
   for (const runtime of RUNTIMES) {
     for (const skill of noteSkills(runtime, readFileSync(join(root, runtime.tools), "utf8"))) {
       const file = `${SKILLS}/${skill}/SKILL.md`;
       if (!existsSync(join(root, file))) throw new Error(`${runtime.tools}: per-skill note for "${skill}", which has no SKILL.md`);
-      if (runtime.preamble) leads.set(file, runtime.preamble);
+      if (runtime.preamble) leads.set(file, [...(leads.get(file) ?? []), runtime.preamble]);
     }
   }
-  for (const playbook of DRIVER_PLAYBOOKS) leads.set(`${SKILLS}/poteto-mode/playbooks/${playbook}.md`, DRIVER_LINE);
+  for (const playbook of DRIVER_PLAYBOOKS) leads.set(`${SKILLS}/poteto-mode/playbooks/${playbook}.md`, [DRIVER_LINE]);
   return leads;
 }
 
-// Put `line` in its own paragraph right under the first heading after the
-// frontmatter, replacing it if already there. Null when there is no heading.
-export function stampLeadLine(text, line) {
+// Put each lead line in its own paragraph under the first heading after the
+// frontmatter, in order, keeping one already there. Null when there is no
+// heading.
+export function stampLeadLine(text, lead) {
   const lines = text.split("\n");
   const bodyStart = lines[0] === "---" ? lines.indexOf("---", 1) + 1 : 0;
   const heading = lines.findIndex((l, i) => i >= bodyStart && /^#{1,6} /.test(l));
   if (heading === -1) return null;
-  const present = lines[heading + 1] === "" && lines[heading + 2] === line;
-  lines.splice(heading + 1, present ? 2 : 0, "", line);
+  let at = heading + 1;
+  for (const line of [lead].flat()) {
+    if (!(lines[at] === "" && lines[at + 1] === line)) lines.splice(at, 0, "", line);
+    at += 2;
+  }
   return lines.join("\n");
 }
 
@@ -461,7 +525,7 @@ export function parseModels(raw, skillExists) {
   };
   const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
   for (const key of ["available", "efforts", "roles"]) if (!Array.isArray(raw[key])) fail(`"${key}" must be a list`);
-  for (const key of ["tiers", ...RUNTIMES.map((runtime) => runtime.key)]) {
+  for (const key of ["tiers", ...RUNTIMES.filter((runtime) => runtime.key).map((runtime) => runtime.key)]) {
     if (!isObject(raw[key])) fail(`"${key}" must be an object`);
   }
   const available = new Set(raw.available);
@@ -502,7 +566,7 @@ export function parseModels(raw, skillExists) {
   if (!raw.efforts.includes(raw.defaultEffort) && raw.defaultEffort !== "session") {
     fail(`defaultEffort "${raw.defaultEffort}" is not an effort level or "session"`);
   }
-  for (const runtime of RUNTIMES) runtime.checkModels(raw[runtime.key], { raw, fail, unique, isObject });
+  for (const runtime of RUNTIMES) runtime.checkModels?.(raw[runtime.key], { raw, fail, unique, isObject });
   return resolveModels(raw);
 }
 
@@ -542,7 +606,7 @@ function portFrontmatter(file, text) {
 
 // The port's derivation of an upstream file, as tools/sync.mjs applies it
 // before comparing with the local copy: the port's frontmatter, then the
-// generator's own stamps, its lead line first. A Models section is appended as the last H2 when
+// generator's own stamps, its lead lines first. A Models section is appended as the last H2 when
 // upstream has none, which is where every hand-added one already sits. A
 // region whose anchor upstream lacks is left unstamped, so the file surfaces
 // as forked or conflicted instead of aborting the sync.
@@ -751,11 +815,12 @@ function shapeFaults(schema, value, subject) {
     );
 }
 
-// A hooks file must have the documented shape, every ${CLAUDE_PLUGIN_ROOT}/<path>
-// a command hook names must exist in the plugin, and one the command executes
+// A hooks file must have the documented shape, every ${<root>}/<path> a
+// command hook names must exist in the plugin, and one the command executes
 // directly must be executable, or the SessionStart hook fails silently for
 // every user.
-export function validateHooks(hooksJson, { statOf, file = "hooks/hooks.json" }) {
+// The root is the variable the runtime exports with the plugin's directory.
+export function validateHooks(hooksJson, { statOf, file = "hooks/hooks.json", root = "CLAUDE_PLUGIN_ROOT" }) {
   const raw = JSON.parse(hooksJson);
   const faults = shapeFaults(HOOKS_FILE, raw, "file");
   if (faults.length) throw new Error(`${file}:\n  ${faults.join("\n  ")}`);
@@ -773,12 +838,12 @@ export function validateHooks(hooksJson, { statOf, file = "hooks/hooks.json" }) 
       }
       if (hook.type !== "command") continue;
       for (const command of [hook.command, hook.commandWindows].filter((value) => value !== undefined)) {
-        const refs = [...command.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([^"\s]+)/g)].map((m) => m[1]);
+        const refs = [...command.matchAll(new RegExp(`\\$\\{${root}\\}/([^"\\s]+)`, "g"))].map((m) => m[1]);
         if (!refs.length) {
-          faults.push(`${event}: command does not reference \${CLAUDE_PLUGIN_ROOT}: ${command}`);
+          faults.push(`${event}: command does not reference \${${root}}: ${command}`);
           continue;
         }
-        const executed = command.replace(/^"/, "").startsWith("${CLAUDE_PLUGIN_ROOT}/");
+        const executed = command.replace(/^"/, "").startsWith(`\${${root}}/`);
         refs.forEach((rel, i) => {
           const st = statOf(rel);
           if (!st) faults.push(`${event}: ${rel} does not exist`);
@@ -825,7 +890,7 @@ export function plan(root, models) {
   }
   for (const runtime of PROMPT_RUNTIMES) {
     for (const skill of slashCommands(read(COMMANDS_DOC), publicSkills(join(root, SKILLS)))) {
-      const preamble = leads.get(`${SKILLS}/${skill.name}/SKILL.md`) === runtime.preamble;
+      const preamble = (leads.get(`${SKILLS}/${skill.name}/SKILL.md`) ?? []).includes(runtime.preamble);
       put(`${runtime.prompts}/${skill.name}.md`, promptStub(skill, runtime, { preamble }));
     }
   }
@@ -951,7 +1016,7 @@ export function problems(root, models) {
       return readFileSync(full, "utf8")
         .split("\n")
         .flatMap((line, i) =>
-          LEAD_LINES.includes(line) && leads.get(file) !== line ? [`${file}:${i + 1}`] : [],
+          LEAD_LINES.includes(line) && !(leads.get(file) ?? []).includes(line) ? [`${file}:${i + 1}`] : [],
         );
     });
     if (strays.length) {
@@ -967,9 +1032,14 @@ export function problems(root, models) {
   for (const packaged of packages) attempt(() => packaged.runtime.validate({ ...packaged, read, pathExists }));
   attempt(() => validatePluginLayout(pluginRoot));
   attempt(() => validateAgentFrontmatter(pluginRoot));
-  const hooksFiles = ["hooks/hooks.json", ...packages.flatMap(({ runtime, manifest }) => runtime.hooks?.(manifest) ?? [])];
-  for (const file of hooksFiles) {
-    attempt(() => validateHooks(readFileSync(join(pluginRoot, file), "utf8"), { statOf, file }));
+  const hooksFiles = [
+    { file: "hooks/hooks.json" },
+    ...packages.flatMap(({ runtime, manifest }) =>
+      (runtime.hooks?.(manifest) ?? []).map((file) => ({ file, root: runtime.pluginRootVar })),
+    ),
+  ];
+  for (const { file, root } of hooksFiles) {
+    attempt(() => validateHooks(readFileSync(join(pluginRoot, file), "utf8"), { statOf, file, root }));
   }
   return failures;
 }
