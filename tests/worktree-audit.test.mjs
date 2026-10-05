@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, wr
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { audit, classify } from "../plugins/pstack/skills/poteto-mode/scripts/worktree-audit.mjs";
+import { audit, classify, defaultTranscriptRoots, lastChats } from "../plugins/pstack/skills/poteto-mode/scripts/worktree-audit.mjs";
 
 const script = join(import.meta.dir, "../plugins/pstack/skills/poteto-mode/scripts/worktree-audit.mjs");
 
@@ -104,7 +104,7 @@ function writeTranscript(fixture, rel, worktree, mtimeSeconds) {
   if (mtimeSeconds) utimesSync(path, mtimeSeconds, mtimeSeconds);
 }
 
-function runAudit(fixture, { prs = [], gh, transcripts = fixture.transcripts } = {}) {
+function runAudit(fixture, { prs = [], gh, transcripts = [fixture.transcripts] } = {}) {
   const warnings = [];
   const calls = [];
   const output = audit({
@@ -184,6 +184,103 @@ test("audits every worktree of a fixture repo end to end", () => {
   expect(rows).toHaveLength(13);
 });
 
+test("a Pi session in a second transcripts root marks the worktree it ran in as a recent chat", () => {
+  const fixture = createFixture();
+  const piChatted = addWorktree(fixture, "pi-chatted");
+  const quiet = addWorktree(fixture, "quiet");
+  const sessions = join(fixture.root, "pi-agent/sessions");
+  const session = join(sessions, `--${piChatted.slice(1).replaceAll("/", "-")}--`, "2026-10-01T00-00-00-000Z_s.jsonl");
+  mkdirSync(dirname(session), { recursive: true });
+  writeFileSync(
+    session,
+    [
+      { type: "session", version: 3, id: "s", timestamp: "2026-10-01T00:00:00.000Z", cwd: piChatted },
+      { type: "message", id: "u1", parentId: null, timestamp: "2026-10-01T00:00:01.000Z", message: { role: "user", content: [{ type: "text", text: "go" }] } },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+  );
+  const { rows, warnings } = runAudit(fixture, { transcripts: [fixture.transcripts, sessions] });
+  expect(warnings).toEqual([]);
+  expect(rowFor(rows, piChatted).slice(6, 8)).toEqual([ymd(Math.floor(Date.now() / 1000)), "verify-recent-chat"]);
+  expect(rowFor(rows, quiet).slice(6, 8)).toEqual(["-", "safe"]);
+});
+
+for (const dir of ["sessions", "archived_sessions"]) {
+  test(`a Codex session in ~/.codex/${dir} marks the worktree it ran in as a recent chat`, () => {
+    const fixture = createFixture();
+    const chatted = addWorktree(fixture, "codex-chatted");
+    const session = join(fixture.root, ".codex", dir, "2026/10/05/rollout.jsonl");
+    mkdirSync(dirname(session), { recursive: true });
+    writeFileSync(session, `${JSON.stringify({ type: "session_meta", payload: { cwd: chatted } })}\n`);
+    const transcripts = defaultTranscriptRoots({ env: {}, home: fixture.root });
+    expect(transcripts).toEqual([join(fixture.root, ".codex", dir)]);
+    const { rows, warnings } = runAudit(fixture, { transcripts });
+    expect(warnings).toEqual([]);
+    expect(rowFor(rows, chatted).slice(6, 8)).toEqual([ymd(Math.floor(Date.now() / 1000)), "verify-recent-chat"]);
+  });
+}
+
+describe("lastChats matches a path as JSONL spells it, never a sibling's prefix", () => {
+  const scan = (path, cwd) => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "worktree-audit-chats-")));
+    fixtures.push(root);
+    mkdirSync(join(root, "2026/10/05"), { recursive: true });
+    writeFileSync(join(root, "2026/10/05/rollout.jsonl"), `${JSON.stringify({ cwd })}\n`);
+    return lastChats([root], [path]).has(path);
+  };
+
+  test.each([
+    ["a POSIX path", "/repo/worktree", "/repo/worktree"],
+    ["a path with a quote", '/repo/with"quote', '/repo/with"quote'],
+    ["a path with a tab", "/repo/with\ttab", "/repo/with\ttab"],
+    ["Windows backslashes", String.raw`C:\repo\worktree`, String.raw`C:\repo\worktree`],
+    ["Git's forward-slash spelling of a Windows path", "C:/repo/worktree", String.raw`C:\repo\worktree`],
+    ["a file under a Windows worktree", "C:/repo/worktree", String.raw`C:\repo\worktree\src\index.ts`],
+    ["a UNC checkout", "//server/share/worktree", String.raw`\\server\share\worktree`],
+  ])("finds %s", (_, path, cwd) => {
+    expect(scan(path, cwd)).toBe(true);
+  });
+
+  test.each([
+    ["/repo/worktree", "/repo/worktree-long/file.ts"],
+    ["C:/repo/worktree", String.raw`C:\repo\worktree-long\src\file.ts`],
+  ])("does not match %s in %s", (path, cwd) => {
+    expect(scan(path, cwd)).toBe(false);
+  });
+});
+
+describe("default transcripts roots", () => {
+  const home = "/home/u";
+  const claude = "/home/u/.claude/projects";
+
+  test("every runtime directory that exists, Pi's under PI_CODING_AGENT_DIR when set", () => {
+    const present = new Set([claude, "/home/u/.codex/sessions", "/pi/sessions", "/pi/pstack", "/home/u/.pi/agent/sessions"]);
+    const exists = (path) => present.has(path);
+    expect(defaultTranscriptRoots({ env: { PI_CODING_AGENT_DIR: "/pi" }, home, exists })).toEqual([
+      claude,
+      "/home/u/.codex/sessions",
+      "/pi/sessions",
+      "/pi/pstack",
+    ]);
+    expect(defaultTranscriptRoots({ env: {}, home, exists })).toEqual([claude, "/home/u/.codex/sessions", "/home/u/.pi/agent/sessions"]);
+  });
+
+  test("Codex's sessions and archived_sessions, under CODEX_HOME when set", () => {
+    const present = new Set(["/home/u/.codex/sessions", "/home/u/.codex/archived_sessions", "/cx/sessions", "/cx/archived_sessions"]);
+    const exists = (path) => present.has(path);
+    expect(defaultTranscriptRoots({ env: {}, home, exists })).toEqual(["/home/u/.codex/sessions", "/home/u/.codex/archived_sessions"]);
+    expect(defaultTranscriptRoots({ env: { CODEX_HOME: "/cx" }, home, exists })).toEqual(["/cx/sessions", "/cx/archived_sessions"]);
+  });
+
+  test("Claude Code's projects under CLAUDE_CONFIG_DIR when set", () => {
+    const exists = (path) => path === claude || path === "/cc/projects";
+    expect(defaultTranscriptRoots({ env: { CLAUDE_CONFIG_DIR: "/cc" }, home, exists })).toEqual(["/cc/projects"]);
+  });
+
+  test("Claude Code's directory when no runtime directory exists, so the audit warns about it", () => {
+    expect(defaultTranscriptRoots({ env: {}, home, exists: () => false })).toEqual([claude]);
+  });
+});
+
 describe("a discovery failure keeps an ancestor out of safe", () => {
   const failures = [
     ["the trunk fetch", (fixture) => {
@@ -193,7 +290,7 @@ describe("a discovery failure keeps an ancestor out of safe", () => {
     ["gh", () => ({ gh: () => { throw new Error("gh: not logged in"); } }), /gh pr list failed.*not logged in/],
     ["gh output that is not JSON", () => ({ gh: () => "rate limited" }), /gh pr list failed/],
     ["gh output that is not a list", () => ({ gh: () => "{}" }), /gh pr list failed/],
-    ["a missing transcripts directory", (fixture) => ({ transcripts: join(fixture.root, "absent") }), /^warn: \S+\/absent not found; LAST_CHAT column will be empty$/],
+    ["a missing transcripts directory", (fixture) => ({ transcripts: [fixture.transcripts, join(fixture.root, "absent")] }), /^warn: \S+\/absent not found; LAST_CHAT column will be empty$/],
     ["an unreadable transcripts directory", (fixture) => {
       const project = join(fixture.transcripts, "-proj");
       mkdirSync(project);
@@ -206,7 +303,7 @@ describe("a discovery failure keeps an ancestor out of safe", () => {
       mkdirSync(project);
       chmodSync(fixture.transcripts, 0o000);
       locked.push(fixture.transcripts);
-      return { transcripts: project };
+      return { transcripts: [project] };
     }, /transcript scan failed.*EACCES/],
   ];
 
@@ -219,6 +316,13 @@ describe("a discovery failure keeps an ancestor out of safe", () => {
     expect(row[7]).toBe("review");
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(warning);
+  });
+
+  test("every missing transcripts directory is named", () => {
+    const fixture = createFixture();
+    const absent = ["absent-a", "absent-b"].map((name) => join(fixture.root, name));
+    const { warnings } = runAudit(fixture, { transcripts: [absent[0], fixture.transcripts, absent[1]] });
+    expect(warnings).toEqual(absent.map((root) => `warn: ${root} not found; LAST_CHAT column will be empty`));
   });
 });
 
