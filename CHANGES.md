@@ -2,6 +2,14 @@
 
 This file is the release changelog, with one `## <version> - <title>` entry per release, newest first. The Cursor-to-Claude rewrite rules live in [`tools/substitutions.json`](tools/substitutions.json), and the [sync boundary](CONTRIBUTING.md#the-sync-boundary) in `CONTRIBUTING.md` defines how a change to upstream's skill content is declared.
 
+## 0.9.72 - sync to upstream 2cbf585 (v0.15.13)
+
+The upstream pin moves from `e43c7ee` to `2cbf585`, upstream v0.15.13, four commits. They add the `/poteto-help` skill, which maps a user's question about pstack to the skill, playbook, or principle that answers it, hands back a prompt to send, and links the file the answer came from, with a prompting reference and a recipes reference beside it. The same range also edits upstream's guide and README, which the port excludes. The package now carries 34 public skills and 24 principles.
+
+`poteto-help` is a port-feature fork, declared in `tools/forks.json`. It reads the current runtime's installation and setup instructions before giving advice, including the persistent `session hook: off` setting. Operational answers come from the installed playbooks and platform mappings, which take precedence over upstream's Cursor guides. The fork carries the port's prose adaptations so upstream wording changes go through a three-way merge. Three substitution rules remain for the public-copy base, the README link, and the recipe's project verification command. Upstream's `disable-model-invocation: true` is dropped as on every public skill, so the model can invoke the skill when a question matches its description.
+
+Measured with `bun tools/sync.mjs pstack 2cbf585`: 3 files added, 81 unchanged, 36 excluded, no merges, and no conflicts. No file became port-only.
+
 ## 0.9.71 - multi-select twins, composed audit symlinks, and test tooling
 
 In Pi, a multi-select question keeps a choice selectable after the user picks another choice with the same label, so two same-label choices can both be picked. Single-select already listed each as its own choice. Picking a choice now hides only that choice, so a typed `Other` answer no longer hides a listed choice with the same text.
