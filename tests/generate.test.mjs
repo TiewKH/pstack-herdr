@@ -180,6 +180,38 @@ describe("strayModelSlugs", () => {
       "plugins/pstack/skills/other/SKILL.md:3: Delegate to `fable` for this.",
     ]);
   });
+
+  test.each([
+    "claude-3-opus-20240229",
+    "claude-3-5-haiku-20241022",
+    "claude-3.7-sonnet",
+    "anthropic/claude-3.5-sonnet",
+    "anthropic.claude-3-5-sonnet-20240620-v1:0",
+  ])("a claude-* ID that puts version numbers before a listed family is a stray: %s", (id) => {
+    const file = "plugins/pstack/skills/other/SKILL.md";
+    expect(strayModelSlugs(file, `# other\n\nDispatch with \`${id}\`.\n`, models)).toEqual([`${file}:3: Dispatch with \`${id}\`.`]);
+  });
+
+  test.each([
+    "Run it in claude-code and read claude-mem.",
+    "Needs claude-code-2.1.267 or newer.",
+    "Needs claude-code-2.x or newer.",
+    "Needs claude-code-2 or newer.",
+    "Pin claude-agent-sdk-0.2.x in package.json.",
+    "Pin claude-sdk-1.x in package.json.",
+    "Sandbox scratch lives in /tmp/claude-501/.",
+    "Sandbox scratch lives in /tmp/claude-99-cwd/.",
+    "Back up to ~/.claude-backup-20261006 first.",
+    "Back up to ~/.claude-backup-06-10 first.",
+    "Tracked as claude-code-issue-12345.",
+    "Tracked as claude-issue-42.",
+    "Name the worktrees claude-wt-1 and claude-wt-2.",
+    "Step claude-1-setup, then claude-2-run.",
+    "Name the worktree claude-wt-opus.",
+    "Run the claude-octopus demo.",
+  ])("a claude-* slug with no listed family after claude- or its version numbers is not a stray: %s", (line) => {
+    expect(strayModelSlugs("plugins/pstack/skills/other/SKILL.md", `# other\n\n${line}\n`, models)).toEqual([]);
+  });
 });
 
 describe("stampVersion", () => {
@@ -202,6 +234,70 @@ describe("assertChangesHeading", () => {
     expect(() => assertChangesHeading("## 0.9.10 - title\n", "0.9.1")).toThrow('no "## 0.9.1 - <title>" heading');
     expect(() => assertChangesHeading("## 0.9.1 - title\n## 0.9.0 — em dash\n## 0.8.9\n", "0.9.1")).toThrow(
       'read "## <version> - <title>":\n## 0.9.0 — em dash\n## 0.8.9',
+    );
+  });
+
+  test("a heading newer than VERSION fails naming both, so an entry without a bump cannot ship", () => {
+    expect(() => assertChangesHeading("# Changes\n\n## 0.9.71 - newer\n\n## 0.9.70 - current\n", "0.9.70")).toThrow(
+      'CHANGES.md\'s newest release heading is "## 0.9.71 - newer", but VERSION is 0.9.70',
+    );
+  });
+
+  test("a newer version that only extends VERSION fails like any other", () => {
+    expect(() => assertChangesHeading("# Changes\n\n## 0.9.70 - newer\n\n## 0.9.7 - current\n", "0.9.7")).toThrow(
+      'CHANGES.md\'s newest release heading is "## 0.9.70 - newer", but VERSION is 0.9.7',
+    );
+  });
+
+  test.each(["## v0.9.71 - newer", "## [0.9.71] - newer", "##  0.9.71 - newer", "##0.9.71 - newer", "### 0.9.71 - newer", "# 0.9.71 - newer"])(
+    "an entry headed %s above the VERSION heading fails, whatever its level, spacing, or decoration",
+    (heading) => {
+      expect(() => assertChangesHeading(`# Changes\n\n${heading}\n\n## 0.9.70 - current\n`, "0.9.70")).toThrow(
+        `CHANGES.md's newest release heading is "${heading}", but VERSION is 0.9.70`,
+      );
+    },
+  );
+
+  test.each(["## About this file", "## Unreleased", "## Format since 0.9.13", "## 2.0 plans"])(
+    "a heading that does not lead with a three-part version is no entry and may sit above the newest: %s",
+    (heading) => {
+      expect(() => assertChangesHeading(`# Changes\n\n${heading}\n\n## 0.9.71 - new\n\n## 0.9.70 - old\n`, "0.9.71")).not.toThrow();
+    },
+  );
+
+  test("a version that heads two entries fails naming both, so new work under the old number cannot ship", () => {
+    expect(() => assertChangesHeading("# Changes\n\n## 0.9.70 - newer work\n\n## 0.9.70 - current\n", "0.9.70")).toThrow(
+      "CHANGES.md heads two entries with one version:\n## 0.9.70 - newer work\n## 0.9.70 - current",
+    );
+  });
+
+  test("a heading that is not a release may sit below the newest entry", () => {
+    expect(() => assertChangesHeading("## 0.9.1 - title\n\n## Upstream review\n\n## 0.9.0 - older\n", "0.9.1")).not.toThrow();
+  });
+
+  test.each([
+    ["an older heading quoted in the newest entry", "## 0.9.71 - new\n\n```\n## 0.9.70 - old\n```\n\n## 0.9.70 - old\n"],
+    ["a sample heading above the first entry", "```md\n## 1.2.3 - title\n```\n\n## 0.9.71 - new\n\n## 0.9.70 - old\n"],
+    ["a tilde fence", "## 0.9.71 - new\n\n~~~\n## 0.9.70 - old\n~~~\n\n## 0.9.70 - old\n"],
+    ["an indented fence", "## 0.9.71 - new\n\n ```\n## 0.9.70 - old\n ```\n\n## 0.9.70 - old\n"],
+    ["a longer fence holding a shorter one", "## 0.9.71 - new\n\n````\n```\n## 0.9.70 - old\n```\n````\n\n## 0.9.70 - old\n"],
+    ["a tilde line inside a backtick fence", "## 0.9.71 - new\n\n```\n~~~\n## 0.9.70 - old\n~~~\n```\n\n## 0.9.70 - old\n"],
+    ["a longer run closing a shorter fence", "```\n## 1.2.3 - sample\n````\n\n## 0.9.71 - new\n\n## 0.9.70 - old\n"],
+    ["a marker with an info string inside a fence", "```\n```md\n## 1.2.3 - sample\n```\n\n## 0.9.71 - new\n\n## 0.9.70 - old\n"],
+  ])("a heading inside a code fence heads no entry: %s", (_, body) => {
+    expect(() => assertChangesHeading(`# Changes\n\n${body}`, "0.9.71")).not.toThrow();
+  });
+
+  test.each([
+    ["in the middle of a line", "Quote a heading in a ``` fence."],
+    ["indented four spaces, which is a code block", "    ```"],
+  ])("three backticks %s open no fence", (_, line) => {
+    expect(() => assertChangesHeading(`# Changes\n\n${line}\n\n## 0.9.71 - new\n\n## 0.9.70 - old\n`, "0.9.71")).not.toThrow();
+  });
+
+  test("a VERSION heading that sits only inside a code fence is no heading", () => {
+    expect(() => assertChangesHeading("# Changes\n\n```\n## 0.9.71 - new\n```\n\n## 0.9.70 - old\n", "0.9.71")).toThrow(
+      'no "## 0.9.71 - <title>" heading',
     );
   });
 });
@@ -384,6 +480,24 @@ describe("lead lines", () => {
     expect(once).toBe("---\nname: x\n# a YAML comment\n---\n\n# Title\n\nLead.\n\nbody\n");
     expect(stampLeadLine(once, "Lead.")).toBe(once);
     expect(stampLeadLine("no heading\n", "Lead.")).toBeNull();
+  });
+
+  test("stamping converges a duplicated lead line, one that lost a blank separator on either side, and one out of order", () => {
+    const canonical = "# X\n\nA.\n\nB.\n\nBody.\n";
+    expect(stampLeadLine("# X\n\nA.\nA.\n\nB.\n\nBody.\n", ["A.", "B."])).toBe(canonical);
+    expect(stampLeadLine("# X\nA.\n\nB.\n\nBody.\n", ["A.", "B."])).toBe(canonical);
+    expect(stampLeadLine("# X\n\nA.\n\nB.\nBody.\n", ["A.", "B."])).toBe(canonical);
+    expect(stampLeadLine("# X\nA.\nB.\nBody.\n", ["A.", "B."])).toBe(canonical);
+    expect(stampLeadLine("# X\n\nB.\n\nA.\n\nBody.\n", ["A.", "B."])).toBe(canonical);
+  });
+
+  test("removing a lead glued to the text below it keeps the blank line that ended the paragraph above", () => {
+    expect(stampLeadLine("# X\n\nIntro.\n\nA.\n\nB.\nBody.\n", ["A.", "B."])).toBe("# X\n\nA.\n\nB.\n\nIntro.\n\nBody.\n");
+    expect(stampLeadLine("# X\n\nB.\n\nBody one.\n\nA.\nBody two.\n", ["A.", "B."])).toBe("# X\n\nA.\n\nB.\n\nBody one.\n\nBody two.\n");
+  });
+
+  test("a lead line that ends the file gains no blank line after it", () => {
+    for (const text of ["# X\n\nA.\n", "# X\n\nA."]) expect(stampLeadLine(text, "A.")).toBe(text);
   });
 
   test("Codex and Copilot stamp a preamble on their noted skills and Pi stamps none", () => {
@@ -683,6 +797,17 @@ describe("plan, changes, apply", () => {
     for (const [file] of leadFiles) expect(files[file]).toBe(readFileSync(join(repoRoot, file), "utf8"));
   });
 
+  test("plan converges a duplicated lead line, so --check flags the file as stale", () => {
+    const root = repoCopy();
+    const file = "plugins/pstack/skills/how/SKILL.md";
+    const original = readFileSync(join(root, file), "utf8");
+    expect(original).toContain(`\n\n${codex.preamble}\n`);
+    writeFileSync(join(root, file), original.replace(`\n\n${codex.preamble}\n`, `\n\n${codex.preamble}\n${codex.preamble}\n`));
+    const intended = plan(root);
+    expect(intended.files[file]).toBe(original);
+    expect(changes(root, intended)).toEqual([{ kind: "write", path: file }]);
+  });
+
   test("two producers on one path compose", () => {
     const root = repoCopy();
     const manifest = "plugins/pstack/.claude-plugin/plugin.json";
@@ -782,6 +907,15 @@ describe("plan, changes, apply", () => {
     ]);
   });
 
+  test("problems reports an agent whose frontmatter name is not its file name", () => {
+    const root = repoCopy();
+    const agent = "plugins/pstack/agents/comment-sicko.md";
+    writeFileSync(join(root, agent), readFileSync(join(root, agent), "utf8").replace(/^name: .*$/m, "name: sicko"));
+    expect(problems(root)).toEqual([
+      expect.stringContaining('./agents/comment-sicko.md: frontmatter name "sicko" != file name "comment-sicko"'),
+    ]);
+  });
+
   test("problems reports a malformed Codex manifest as one failure and still runs the other checks", () => {
     const root = repoCopy();
     const manifest = "plugins/pstack/.codex-plugin/plugin.json";
@@ -807,5 +941,22 @@ describe("plan, changes, apply", () => {
       expect.stringContaining(`${manifest}: name "other"`),
       expect.stringContaining("hooks/gone.sh does not exist"),
     ]);
+  });
+
+  test("problems reports a hook path that resolves outside the plugin, through .. or through a symlink", () => {
+    const root = repoCopy();
+    const hooks = "plugins/pstack/hooks/hooks.json";
+    const text = readFileSync(join(root, hooks), "utf8");
+    writeFileSync(join(root, hooks), text.replace("hooks/session-start.sh", "../../tools/generate.mjs"));
+    expect(problems(root)).toEqual([expect.stringContaining("../../tools/generate.mjs does not exist in the plugin")]);
+    const outside = join(scratch("pstack-outside-"), "start.sh");
+    writeFileSync(outside, "#!/bin/sh\n", { mode: 0o755 });
+    symlinkSync(outside, join(root, "plugins/pstack/hooks/linked.sh"));
+    writeFileSync(join(root, hooks), text.replace("hooks/session-start.sh", "hooks/linked.sh"));
+    expect(problems(root)).toEqual([expect.stringContaining("hooks/linked.sh does not exist in the plugin")]);
+  });
+
+  test("problems reports a root with no plugin directory, down to the last check, and does not throw", () => {
+    expect(problems(scratch("pstack-empty-"))).toContainEqual(expect.stringContaining("plugins/pstack/hooks/hooks.json"));
   });
 });

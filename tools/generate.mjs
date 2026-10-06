@@ -110,17 +110,45 @@ export function stampVersion(text, version, file) {
   return text.replace(/("version"\s*:\s*)"[^"]*"/, `$1"${version}"`);
 }
 
-// Every release heading reads "## <version> - <title>"; the current version
-// must have one. A bump without an entry (or an entry without a bump) ships a
-// release nobody can read about.
+// The lines outside fenced code blocks. A fence opens at three or more
+// backticks or tildes indented at most three spaces, and closes at the next
+// line that holds nothing but at least as many of the same character.
+function outsideFences(lines) {
+  let fence = null;
+  return lines.filter((line) => {
+    const [, mark, after] = line.match(/^ {0,3}(`{3,}|~{3,})(.*)/) ?? [];
+    if (fence) {
+      if (mark?.startsWith(fence) && !after.trim()) fence = null;
+      return false;
+    }
+    if (mark) fence = mark;
+    return !mark;
+  });
+}
+
+// Plugin auto-update installs by version number (CONTRIBUTING, Releasing), so
+// a CHANGES entry whose VERSION bump was forgotten ships nothing.
 export function assertChangesHeading(changelog, version) {
-  const lines = changelog.split("\n");
+  const lines = outsideFences(changelog.split("\n"));
   const current = lines.find((line) => line.startsWith(`## ${version} `));
   if (!current) throw new Error(`CHANGES.md has no "## ${version} - <title>" heading`);
-  const malformed = lines.filter((line) => /^## \d+\.\d+\.\d+/.test(line) && !/^## \d+\.\d+\.\d+ - \S/.test(line));
+  // An entry is a heading whose first word carries a version, at any level or
+  // decoration: "# 1.2.3", "## v1.2.3", "## [1.2.3]". A heading without one is
+  // not read as an entry, because "## Unreleased" over forgotten work has the
+  // shape of a preamble section such as "## About this file". The word is
+  // taken whole and searched from the start of each run of digits, so a long
+  // run of hashes or digits is read once.
+  const leadsWithVersion = (line) => /(?:^|\D)\d+\.\d+\.\d/.test(line.match(/^#+\s*(\S*)/)?.[1] ?? "");
+  const newest = lines.find(leadsWithVersion);
+  if (newest !== current) throw new Error(`CHANGES.md's newest release heading is "${newest}", but VERSION is ${version}`);
+  const headings = lines.filter((line) => /^## \d+\.\d+\.\d+/.test(line));
+  const malformed = headings.filter((line) => !/^## \d+\.\d+\.\d+ - \S/.test(line));
   if (malformed.length) {
     throw new Error(`CHANGES.md release headings read "## <version> - <title>":\n${malformed.join("\n")}`);
   }
+  const versions = headings.map((line) => line.split(" ")[1]);
+  const repeated = headings.filter((_, i) => versions.indexOf(versions[i]) !== versions.lastIndexOf(versions[i]));
+  if (repeated.length) throw new Error(`CHANGES.md heads two entries with one version:\n${repeated.join("\n")}`);
 }
 
 // Split a Markdown file into its YAML frontmatter and the text after it.
@@ -185,8 +213,12 @@ export function validatePluginLayout(pluginRoot) {
   const bareDispatches = [];
   for (const file of markdownFiles(join(pluginRoot, "skills"))) {
     readFileSync(file, "utf8").split("\n").forEach((line, i) => {
-      for (const name of agents) {
-        if (line.includes(`subagent_type: "${name}"`)) {
+      // The key is a whole word, but a letter that a backslash escapes does
+      // not extend it: \b would reject the key after the n of a literal "\n".
+      // The text before the key is consumed, not asserted, because a leading
+      // lookbehind scanned a long line about nine times slower.
+      for (const [, name] of line.matchAll(/(?:^|\W|\\[a-z])subagent_type[\s\\"'`*]*[:=][\s\\"'`*]*([a-z0-9-]+)(?![\w-]|\.\w)/g)) {
+        if (agents.includes(name)) {
           bareDispatches.push(`${relative(pluginRoot, file)}:${i + 1}: subagent_type: "${name}" (use "pstack:${name}")`);
         }
       }
@@ -464,19 +496,22 @@ export function loadLeadLines(root = repo) {
 }
 
 // Put each lead line in its own paragraph under the first heading after the
-// frontmatter, in order, keeping one already there. Null when there is no
-// heading.
+// frontmatter, in order. Null when there is no heading.
 export function stampLeadLine(text, lead) {
+  const leads = [lead].flat();
   const lines = text.split("\n");
   const bodyStart = lines[0] === "---" ? lines.indexOf("---", 1) + 1 : 0;
   const heading = lines.findIndex((l, i) => i >= bodyStart && /^#{1,6} /.test(l));
   if (heading === -1) return null;
-  let at = heading + 1;
-  for (const line of [lead].flat()) {
-    if (!(lines[at] === "" && lines[at + 1] === line)) lines.splice(at, 0, "", line);
-    at += 2;
-  }
-  return lines.join("\n");
+  const rest = [];
+  // A removed lead takes the blank above it only when a blank or the end
+  // follows, so the paragraphs on either side of it stay apart.
+  lines.slice(heading + 1).forEach((line, i, below) => {
+    if (!leads.includes(line)) rest.push(line);
+    else if (rest.at(-1) === "" && !below[i + 1]) rest.pop();
+  });
+  if (rest[0]) rest.unshift("");
+  return [...lines.slice(0, heading + 1), ...leads.flatMap((line) => ["", line]), ...rest].join("\n");
 }
 
 // Stamp every region the generator owns in `file` (repo-relative). A missing
@@ -508,6 +543,7 @@ export function resolveModels(models) {
 }
 
 const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+const TIERS = ["default", "strongest", "panel"];
 
 // Check models.json's shape and resolve its tiers, throwing with the offending
 // role, tier, or slug named. `skillExists(skill)` reports whether a role's
@@ -530,6 +566,9 @@ export function parseModels(raw, skillExists) {
   }
   const available = new Set(raw.available);
   unique(raw.available, "available");
+  for (const tier of TIERS) {
+    if (!Object.hasOwn(raw.tiers, tier)) fail(`tiers has no "${tier}", which a stamped region renders from`);
+  }
   const tierLists = new Map();
   for (const [tier, value] of Object.entries(raw.tiers)) {
     const slugs = [value].flat();
@@ -700,7 +739,9 @@ export function validateAgentFrontmatter(pluginRoot) {
   const failures = pluginAgentPaths(pluginRoot).flatMap((path) => {
     try {
       const { data } = parseFrontmatter(readFileSync(join(pluginRoot, path), "utf8"));
-      return data?.name && data?.description ? [] : [`${path}: frontmatter needs a name and a description`];
+      if (!data?.name || !data?.description) return [`${path}: frontmatter needs a name and a description`];
+      const file = basename(path, ".md");
+      return data.name === file ? [] : [`${path}: frontmatter name "${data.name}" != file name "${file}"`];
     } catch (err) {
       return [`${path}: ${err.message}`];
     }
@@ -748,7 +789,10 @@ export function overrideSheetBlock(models) {
 // family name hard-codes a default that belongs in models.json.
 export function strayModelSlugs(file, text, models) {
   const families = models.available.join("|");
-  const SLUG_RE = new RegExp(`claude-(?:${families})[0-9a-z.-]*|\`(?:${families})\``);
+  // Version numbers may sit between claude- and the family (claude-3-opus,
+  // claude-3.7-sonnet). An unlisted family is not guessed at: claude-mythos-1
+  // has the shape of claude-wt-1.
+  const SLUG_RE = new RegExp(`claude-(?:[0-9.]+-)*(?:${families})[0-9a-z.-]*|\`(?:${families})\``);
   const lines = text.split("\n");
   const owned = regions(models)
     .filter((r) => r.file === file)
@@ -846,7 +890,7 @@ export function validateHooks(hooksJson, { statOf, file = "hooks/hooks.json", ro
         const executed = command.replace(/^"/, "").startsWith(`\${${root}}/`);
         refs.forEach((rel, i) => {
           const st = statOf(rel);
-          if (!st) faults.push(`${event}: ${rel} does not exist`);
+          if (!st) faults.push(`${event}: ${rel} does not exist in the plugin`);
           else if (i === 0 && executed && !(st.mode & 0o111)) faults.push(`${event}: ${rel} is not executable`);
         });
       }
@@ -995,7 +1039,11 @@ export function problems(root, models) {
     }),
   ).filter(Boolean);
   models ??= attempt(() => loadModels(root));
-  const statOf = (rel) => (existsSync(join(pluginRoot, rel)) ? statSync(join(pluginRoot, rel)) : null);
+  const statOf = (rel) => {
+    const full = join(pluginRoot, rel);
+    if (!existsSync(full) || !pathIsInside(realpathSync(pluginRoot), realpathSync(full))) return null;
+    return statSync(full);
+  };
   if (models) {
     attempt(() => {
       const strays = markdownFiles(skillsDir).flatMap((full) =>
