@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { defaultSettings, PSTACK_STATE_DIR } from "../plugins/pstack/pi/config.ts";
-import { audit, classify, defaultTranscriptRoots, duSize, lastChats, pathSpellings } from "../plugins/pstack/skills/poteto-mode/scripts/worktree-audit.mjs";
+import { audit, classify, defaultTranscriptRoots, duSize, lastChats, pathSpellings, symlinkTargets } from "../plugins/pstack/skills/poteto-mode/scripts/worktree-audit.mjs";
 import { removeDuring } from "./remove-during.mjs";
 
 const script = join(import.meta.dir, "../plugins/pstack/skills/poteto-mode/scripts/worktree-audit.mjs");
@@ -41,19 +41,22 @@ describe("classify", () => {
     head: known(HEAD),
     age: known(3),
     ancestry: known(true),
-    dirty: known({ wip: 0, scratch: 0 }),
+    dirty: known({ wip: 0, untracked: 0 }),
     remote: known("pushed"),
     pr: known(null),
     recent: known(false),
+    locked: known(null),
   };
   const mergedPr = { ...ancestor, ancestry: known(false), pr: known({ number: 8, state: "MERGED", headRefOid: HEAD }) };
   const allUnknown = Object.fromEntries(Object.keys(ancestor).map((name) => [name, unknown]));
-  const wip = known({ wip: 1, scratch: 0 });
+  const wip = known({ wip: 1, untracked: 0 });
+  const untracked = known({ wip: 0, untracked: 2 });
   const openPr = known({ number: 7, state: "OPEN", headRefOid: HEAD });
 
   test.each([
     ["an ancestor of the trunk", ancestor, "safe"],
-    ["an ancestor with only untracked scratch", { ...ancestor, dirty: known({ wip: 0, scratch: 2 }) }, "safe"],
+    ["untracked files only", { ...ancestor, dirty: untracked }, "hold-untracked"],
+    ["tracked and untracked work", { ...ancestor, dirty: known({ wip: 1, untracked: 2 }) }, "hold-wip"],
     ["a merged PR whose head is the worktree HEAD", mergedPr, "safe"],
     ["commits beyond a merged PR head", { ...mergedPr, head: known("b".repeat(40)) }, "review"],
     ["a closed PR whose head is the worktree HEAD", { ...mergedPr, pr: known({ number: 9, state: "CLOSED", headRefOid: HEAD }) }, "review"],
@@ -61,9 +64,14 @@ describe("classify", () => {
     ["tracked uncommitted work", { ...ancestor, dirty: wip }, "hold-wip"],
     ["an open PR", { ...ancestor, pr: openPr }, "hold-open-pr"],
     ["a chat within four days", { ...ancestor, recent: known(true) }, "verify-recent-chat"],
+    ["a locked worktree", { ...ancestor, locked: known("in use by agent 42") }, "hold-locked"],
+    ["a locked worktree with tracked work and an open PR", { ...ancestor, locked: known("locked"), dirty: wip, pr: openPr }, "hold-locked"],
     ["tracked work with an open PR and a recent chat", { ...ancestor, dirty: wip, pr: openPr, recent: known(true) }, "hold-wip"],
+    ["untracked files with an open PR and a recent chat", { ...ancestor, dirty: untracked, pr: openPr, recent: known(true) }, "hold-untracked"],
     ["an open PR with a recent chat", { ...ancestor, pr: openPr, recent: known(true) }, "hold-open-pr"],
     ["tracked work while every other fact is unknown", { ...allUnknown, dirty: wip }, "hold-wip"],
+    ["untracked files while every other fact is unknown", { ...allUnknown, dirty: untracked }, "hold-untracked"],
+    ["a locked worktree while every other fact is unknown", { ...allUnknown, locked: known("locked") }, "hold-locked"],
     ["an open PR while every other fact is unknown", { ...allUnknown, pr: openPr }, "hold-open-pr"],
     ["a recent chat while every other fact is unknown", { ...allUnknown, recent: known(true) }, "verify-recent-chat"],
   ])("%s -> %s", (_, facts, bucket) => {
@@ -147,6 +155,15 @@ function runAudit(fixture, { prs = [], gh, transcripts = [fixture.transcripts] }
 
 const rowFor = (rows, worktree) => rows.find((row) => row.at(-1) === worktree);
 const ymd = (seconds) => new Date(seconds * 1000).toISOString().slice(0, 10);
+
+// node works out a link's target from its text where bun asks the kernel, so the two can disagree on a row.
+function rowUnderNode(fixture, worktree) {
+  const body = `const { audit } = await import(${JSON.stringify(scriptUrl)});
+    process.stdout.write(audit({ repo: ${JSON.stringify(fixture.repo)}, transcripts: [${JSON.stringify(fixture.transcripts)}], gh: () => "[]" }));`;
+  const run = spawnSync("node", ["--input-type=module", "-e", body], { encoding: "utf8" });
+  expect(run.stderr).toBe("");
+  return rowFor(run.stdout.trimEnd().split("\n").map((line) => line.split("\t")), worktree);
+}
 const head = (worktree) => git("-C", worktree, "rev-parse", "HEAD");
 
 test("audits every worktree of a fixture repo end to end", () => {
@@ -166,8 +183,21 @@ test("audits every worktree of a fixture repo end to end", () => {
   const dirty = addWorktree(fixture, "dirty");
   commit(dirty, "tracked");
   writeFileSync(join(dirty, "tracked.txt"), "changed\n");
-  const scratch = addWorktree(fixture, "scratch");
-  writeFileSync(join(scratch, "notes.txt"), "scratch\n");
+  const untracked = addWorktree(fixture, "untracked");
+  writeFileSync(join(untracked, "notes.txt"), "untracked\n");
+  mkdirSync(join(untracked, "src/feature"), { recursive: true });
+  for (const name of ["a.ts", "b.ts"]) writeFileSync(join(untracked, "src/feature", name), "export {};\n");
+  const mixed = addWorktree(fixture, "mixed");
+  writeFileSync(join(mixed, "base.txt"), "changed\n");
+  for (const name of ["a.ts", "b.ts"]) writeFileSync(join(mixed, name), "export {};\n");
+  const inUse = addWorktree(fixture, "in-use");
+  // git trims spaces, tabs and newlines from a reason, and leaves a form feed.
+  git("-C", fixture.repo, "worktree", "lock", "--reason", "in use by agent 42\nuntil its\tPR lands\f", inUse);
+  const lockedSilently = addWorktree(fixture, "locked-silently");
+  git("-C", fixture.repo, "worktree", "lock", lockedSilently);
+  const lockedAway = addWorktree(fixture, "locked-away");
+  git("-C", fixture.repo, "worktree", "lock", "--reason", "on a removable drive", lockedAway);
+  rmSync(lockedAway, { recursive: true });
   const chatted = addWorktree(fixture, "chatted-long");
   const prefix = addWorktree(fixture, "chatted");
   writeTranscript(fixture, "-proj/session/subagents/workflows/wf_1/agent-a.jsonl", chatted);
@@ -186,27 +216,86 @@ test("audits every worktree of a fixture repo end to end", () => {
     ],
   });
 
-  expect(header).toBe("SIZE\tAGE\tMERGED\tDIRTY\tREMOTE\tPR\tLAST_CHAT\tBUCKET\tWORKTREE");
+  expect(header).toBe("SIZE\tAGE\tMERGED\tDIRTY\tREMOTE\tPR\tLAST_CHAT\tBUCKET\tLOCKED\tWORKTREE");
   expect(warnings).toEqual([]);
   expect(calls).toHaveLength(1);
   expect(calls[0].args.join(" ")).toContain("--state all");
   expect(rows[0].at(-1)).toBe(merged);
   const today = ymd(now);
   const columns = (worktree) => rowFor(rows, worktree).slice(1);
-  expect(columns(ancestor)).toEqual(["0d", "YES", "clean", "no-remote", "-", "-", "safe", ancestor]);
-  expect(columns(spaced)).toEqual(["0d", "YES", "clean", "no-remote", "-", "-", "safe", spaced]);
-  expect(columns(detached)).toEqual(["0d", "YES", "clean", "detached", "-", "-", "safe", detached]);
-  expect(columns(landed)).toEqual(["0d", "YES", "clean", "no-remote", "-", "-", "safe", landed]);
-  expect(columns(merged)).toEqual(["0d", "no", "clean", "pushed", "#8/MERGED", "-", "safe", merged]);
-  expect(columns(open)).toEqual(["0d", "YES", "clean", "no-remote", "#7/OPEN", "-", "hold-open-pr", open]);
-  expect(columns(dirty)).toEqual(["0d", "no", "wip:1", "no-remote", "-", "-", "hold-wip", dirty]);
-  expect(columns(scratch)).toEqual(["0d", "YES", "scratch:1", "no-remote", "-", "-", "safe", scratch]);
-  expect(columns(chatted)).toEqual(["0d", "YES", "clean", "no-remote", "-", today, "verify-recent-chat", chatted]);
-  expect(columns(prefix)).toEqual(["0d", "YES", "clean", "no-remote", "-", "-", "safe", prefix]);
-  expect(columns(stale)).toEqual(["0d", "YES", "clean", "no-remote", "-", ymd(staleAt), "safe", stale]);
-  expect(columns(broken)).toEqual(["0d", "YES", "unknown", "no-remote", "-", "-", "review", broken]);
-  expect(rowFor(rows, gone)).toEqual(["-", "?", "-", "-", "-", "-", "-", "prunable", gone]);
-  expect(rows).toHaveLength(13);
+  expect(columns(ancestor)).toEqual(["0d", "YES", "clean", "no-remote", "-", "-", "safe", "-", ancestor]);
+  expect(columns(spaced)).toEqual(["0d", "YES", "clean", "no-remote", "-", "-", "safe", "-", spaced]);
+  expect(columns(detached)).toEqual(["0d", "YES", "clean", "detached", "-", "-", "safe", "-", detached]);
+  expect(columns(landed)).toEqual(["0d", "YES", "clean", "no-remote", "-", "-", "safe", "-", landed]);
+  expect(columns(merged)).toEqual(["0d", "no", "clean", "pushed", "#8/MERGED", "-", "safe", "-", merged]);
+  expect(columns(open)).toEqual(["0d", "YES", "clean", "no-remote", "#7/OPEN", "-", "hold-open-pr", "-", open]);
+  expect(columns(dirty)).toEqual(["0d", "no", "wip:1", "no-remote", "-", "-", "hold-wip", "-", dirty]);
+  expect(columns(untracked)).toEqual(["0d", "YES", "untracked:3", "no-remote", "-", "-", "hold-untracked", "-", untracked]);
+  expect(columns(mixed)).toEqual(["0d", "YES", "wip:1,untracked:2", "no-remote", "-", "-", "hold-wip", "-", mixed]);
+  expect(columns(inUse)).toEqual(["0d", "YES", "clean", "no-remote", "-", "-", "hold-locked", "in use by agent 42 until its PR lands", inUse]);
+  expect(columns(lockedSilently)).toEqual(["0d", "YES", "clean", "no-remote", "-", "-", "hold-locked", "locked", lockedSilently]);
+  // git never calls a locked worktree prunable, so its lock outlives its directory.
+  expect(columns(lockedAway)).toEqual(["?", "?", "unknown", "unknown", "-", "-", "hold-locked", "on a removable drive", lockedAway]);
+  expect(columns(chatted)).toEqual(["0d", "YES", "clean", "no-remote", "-", today, "verify-recent-chat", "-", chatted]);
+  expect(columns(prefix)).toEqual(["0d", "YES", "clean", "no-remote", "-", "-", "safe", "-", prefix]);
+  expect(columns(stale)).toEqual(["0d", "YES", "clean", "no-remote", "-", ymd(staleAt), "safe", "-", stale]);
+  expect(columns(broken)).toEqual(["0d", "YES", "unknown", "no-remote", "-", "-", "review", "-", broken]);
+  expect(rowFor(rows, gone)).toEqual(["-", "?", "-", "-", "-", "-", "-", "prunable", "-", gone]);
+  expect(rows).toHaveLength(17);
+});
+
+test("a status.showUntrackedFiles=no config does not hide untracked files from the audit", () => {
+  const fixture = createFixture();
+  const hidden = addWorktree(fixture, "hidden");
+  writeFileSync(join(hidden, "notes.txt"), "untracked\n");
+  git("-C", fixture.repo, "config", "status.showUntrackedFiles", "no");
+  expect(git("-C", hidden, "status", "--porcelain")).toBe("");
+  const row = rowFor(runAudit(fixture).rows, hidden);
+  expect([row[3], row[7]]).toEqual(["untracked:1", "hold-untracked"]);
+});
+
+// Windows caps a path near 260 bytes, so a mebibyte of status output would take thousands of files there.
+test.skipIf(process.platform === "win32")("untracked files are counted when git status prints more than a mebibyte", () => {
+  const fixture = createFixture();
+  const big = addWorktree(fixture, "big");
+  const deep = join(big, ...Array(3).fill("d".repeat(200)));
+  mkdirSync(deep, { recursive: true });
+  for (let index = 0; index < 1800; index += 1) writeFileSync(join(deep, `${index}.txt`), "");
+  const status = spawnSync("git", ["-C", big, "status", "--porcelain", "--untracked-files=all"], { maxBuffer: Infinity });
+  expect(status.stdout.length).toBeGreaterThan(1024 * 1024);
+  const row = rowFor(runAudit(fixture).rows, big);
+  expect([row[3], row[7]]).toEqual(["untracked:1800", "hold-untracked"]);
+});
+
+test("a diff.ignoreSubmodules=all config does not hide submodule work from the audit", () => {
+  const fixture = createFixture();
+  const lib = join(fixture.root, "lib");
+  git("init", "--initial-branch=main", lib);
+  commit(lib, "lib");
+  // git refuses to clone a submodule from a local path without this.
+  const submodule = (worktree, ...args) => git("-C", worktree, "-c", "protocol.file.allow=always", "submodule", ...args);
+  submodule(fixture.repo, "add", lib, "sub");
+  commit(fixture.repo, "add submodule");
+  git("-C", fixture.repo, "push", "origin", "main");
+  const checkout = (name) => {
+    const worktree = addWorktree(fixture, name);
+    submodule(worktree, "update", "--init");
+    return worktree;
+  };
+  const edited = checkout("sub-edited");
+  writeFileSync(join(edited, "sub/lib.txt"), "edited\n");
+  const added = checkout("sub-added");
+  writeFileSync(join(added, "sub/new.txt"), "never added\n");
+  const committed = checkout("sub-committed");
+  commit(join(committed, "sub"), "local only");
+  git("-C", fixture.repo, "config", "diff.ignoreSubmodules", "all");
+
+  const { rows } = runAudit(fixture);
+  for (const worktree of [edited, added, committed]) {
+    expect(git("-C", worktree, "status", "--porcelain")).toBe("");
+    const row = rowFor(rows, worktree);
+    expect([row[2], row[3], row[7]]).toEqual(["YES", "wip:1", "hold-wip"]);
+  }
 });
 
 test("a Pi session in a second transcripts root marks the worktree it ran in as a recent chat", () => {
@@ -284,6 +373,9 @@ describe("lastChats matches a path as JSONL spells it, never a sibling's prefix"
     ["a path ending the text with a period", "/repo/worktree", "see /repo/worktree."],
     ["a path closing a bracket", "/repo/worktree", "[cmd /repo/worktree]"],
     ["a path closing a shell default", "/repo/worktree", "${WT:-/repo/worktree}"],
+    ["a path ending a question", "/repo/worktree", "still using /repo/worktree?"],
+    ["a path ending an exclamation", "/repo/worktree", "done with /repo/worktree!"],
+    ["a path before a URL query", "/repo/worktree", "open vscode://file/repo/worktree?windowId=1"],
   ])("finds %s", (_, path, cwd) => {
     expect(scan(path, cwd)).toBe(true);
   });
@@ -343,6 +435,45 @@ describe("pathSpellings", () => {
       expect(pathSpellings(join(root, "real/worktree"))).toEqual(before);
     });
 
+    test.skipIf(noChmod)("a link whose route this user cannot search is a failure, because it may land on the worktree", () => {
+      const root = layout();
+      mkdirSync(join(root, "sealed"));
+      symlinkSync(`${root}/sealed/../real`, join(root, "alias"));
+      chmodSync(join(root, "sealed"), 0o000);
+      locked.push(join(root, "sealed"));
+      expect(() => pathSpellings(join(root, "real/worktree"))).toThrow(/EACCES.*alias/);
+    });
+
+    // bun opens a link's target to name it, which macOS refuses here as it does for its autofs /home.
+    test.skipIf(noChmod)("a link to a directory this user cannot list is not a failure", () => {
+      const root = layout();
+      const before = pathSpellings(join(root, "real/worktree"));
+      mkdirSync(join(root, "elsewhere"));
+      symlinkSync(join(root, "elsewhere"), join(root, "other"));
+      chmodSync(join(root, "elsewhere"), 0o311);
+      locked.push(join(root, "elsewhere"));
+      expect(pathSpellings(join(root, "real/worktree"))).toEqual(before);
+    });
+
+    // Stands in for a filesystem: each listed path reports the given device and inode.
+    const reporting = (ids) => (path, options) => {
+      if (!ids[path]) return statSync(path, options);
+      const [dev, ino] = ids[path];
+      return options?.bigint ? { dev, ino } : { dev: Number(dev), ino: Number(ino) };
+    };
+    const spell = (path, stat) => pathSpellings(path, (dir) => symlinkTargets(dir, stat), stat);
+
+    test("a link that shares its identity with two directories on the path is a spelling of both", () => {
+      const root = layout();
+      const worktree = join(root, "real/worktree");
+      mkdirSync(join(root, "elsewhere"));
+      symlinkSync(join(root, "elsewhere"), join(root, "other"));
+      const shared = [1n, 7n];
+      const spellings = spell(worktree, reporting({ [join(root, "real")]: shared, [worktree]: shared, [join(root, "other")]: shared }));
+      expect(spellings).toContain(join(root, "other/worktree"));
+      expect(spellings).toContain(join(root, "other"));
+    });
+
     test("a symlink reached through another symlink composes with it", () => {
       const root = layout();
       mkdirSync(join(root, "real/deep/worktree"), { recursive: true });
@@ -383,6 +514,33 @@ describe("pathSpellings", () => {
       const { rows, warnings } = runAudit(fixture);
       expect(warnings).toEqual([]);
       expect(rowFor(rows, worktree).slice(6, 8)).toEqual([ymd(Math.floor(Date.now() / 1000)), "verify-recent-chat"]);
+    });
+
+    const heldUnderBunAndNode = (link) => {
+      const fixture = createFixture();
+      const worktree = addWorktree(fixture, "real/worktree");
+      link(fixture.root);
+      writeTranscript(fixture, "-proj/session.jsonl", join(fixture.root, "alias/worktree"));
+      const held = [ymd(Math.floor(Date.now() / 1000)), "verify-recent-chat"];
+      expect(rowFor(runAudit(fixture).rows, worktree).slice(6, 8)).toEqual(held);
+      expect(rowUnderNode(fixture, worktree).slice(6, 8)).toEqual(held);
+    };
+
+    test.skipIf(noNode)("node holds a worktree whose only chat named it through a symlink, as bun does", () => {
+      heldUnderBunAndNode((root) => symlinkSync(join(root, "real"), join(root, "alias")));
+    });
+
+    // node resolves `..` in a link's target before the links in it. Windows has no such route.
+    test.skipIf(noNode || process.platform === "win32")("node holds a worktree whose only chat named it through a link that climbs out of another link", () => {
+      heldUnderBunAndNode((root) => {
+        symlinkSync(join(root, "real/worktree"), join(root, "hop"));
+        symlinkSync(`${root}/hop/..`, join(root, "alias"));
+      });
+    });
+
+    // node keeps a route through a firmlink as written.
+    test.skipIf(noNode || process.platform !== "darwin")("node holds a worktree whose only chat named it through a link over macOS's data volume", () => {
+      heldUnderBunAndNode((root) => symlinkSync(`/System/Volumes/Data${join(root, "real")}`, join(root, "alias")));
     });
   });
 });
@@ -520,6 +678,13 @@ describe("a discovery failure keeps an ancestor out of safe", () => {
       locked.push(fixture.root);
       return {};
     }, /^warn: could not resolve the spellings of \S+\/ancestor; LAST_CHAT column will be empty: EACCES/],
+    ["a link to the worktree whose route can no longer be searched", (fixture) => {
+      mkdirSync(join(fixture.root, "sealed"));
+      symlinkSync(`${fixture.root}/sealed/../ancestor`, join(fixture.root, "alias"));
+      chmodSync(join(fixture.root, "sealed"), 0o000);
+      locked.push(join(fixture.root, "sealed"));
+      return {};
+    }, /^warn: could not resolve the spellings of \S+\/ancestor; LAST_CHAT column will be empty: EACCES.*alias/],
   ];
 
   const keepsAncestorOutOfSafe = (_, inject, warning) => {
