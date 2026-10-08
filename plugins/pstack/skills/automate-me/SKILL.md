@@ -7,6 +7,8 @@ description: "Use for \"automate me\", \"create/update/refresh my -mode skill\",
 
 On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following this skill.
 
+On GitHub Copilot, read the [platform mapping](../poteto-mode/references/copilot-tools.md), including its per-skill notes, before following this skill.
+
 On Herdr, read the [Herdr execution mapping](../poteto-mode/references/herdr-tools.md), including its per-skill notes, before following this skill.
 
 A guided flow for turning the user's working conventions into a skill agents will follow. The output is one `-mode` skill tailored to them (e.g. `jay-mode`, `priya-mode`).
