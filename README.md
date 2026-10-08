@@ -2,7 +2,7 @@
 
 [pstack](https://github.com/cursor/plugins/tree/main/pstack) for Claude Code and Codex, with delegated agents running as visible [Herdr](https://github.com/herdrdev/herdr) panes.
 
-This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the Claude Code, Codex, and Pi port of Lauren Tan's pstack. It has 57 Agent Skills: 33 public skills and 24 `principle-*` leaves. The skill tree is synced against upstream `e43c7ee` from `cursor/plugins/pstack`.
+This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the Claude Code, Codex, Pi, and GitHub Copilot port of Lauren Tan's pstack. It has 58 Agent Skills: 34 public skills and 24 `principle-*` leaves. The skill tree is synced against upstream `2cbf585` from `cursor/plugins/pstack`.
 
 Inside Herdr (`HERDR_ENV=1`), workflows that delegate start real Claude Code or Codex workers in Herdr panes, routed by role. You can watch and answer each worker. Outside Herdr, the plugin behaves like pstack-claude.
 
@@ -34,7 +34,20 @@ pi install git:github.com/TiewKH/pstack-herdr
 
 The package loads the skills and the pstack Pi extension, which adds the subagent, question, and wake-up tools the skills use, plus `/loop` and the routing instruction. Invoke a skill with `/skill:<name>`. Herdr delegation is verified from Claude Code and Codex coordinators only.
 
-Run `setup-pstack` to change model defaults, set a reasoning effort per role (for example `arena runners: opus @xhigh, fable @max`, which Claude Code dispatches through the plugin's `pstack:effort-<level>` or `pstack:poteto-agent-<level>` agents; roles without a level keep the session's effort unless the sheet's `default effort` line names one), or turn automatic routing off. The plugin installs the routing hook on Claude Code and Codex; Codex asks you to trust it through `/hooks` before it runs. On Pi the extension injects the same routing instruction. In Claude Code, use `/pstack:setup-pstack`. For skills-only installs and other runtimes, see [shared installation](docs/reference.md#shared-skills-installation).
+### GitHub Copilot
+
+Run in your terminal:
+
+```shell
+copilot plugin marketplace add TiewKH/pstack-herdr
+copilot plugin install pstack@pstack-claude
+```
+
+This installs pstack for the Copilot CLI and the GitHub Copilot app, which share `~/.copilot`. Start a new session afterwards. Copilot ships no default pstack models, so the first skill that needs one runs `setup-pstack` to pick from the models your account lists, and later sessions reuse that choice. Herdr delegation is verified from Claude Code and Codex coordinators only.
+
+The Copilot build is tested on Copilot CLI 1.0.87 through 1.0.92. On those versions the routing hook's context reaches the session alongside other plugins' session-start context. If a later version keeps only one plugin's context, `setup-pstack` offers a [standing instruction](plugins/pstack/skills/setup-pstack/copilot.md#wire-it-in) for `~/.copilot/copilot-instructions.md` instead. On 1.0.92, once the CLI caches its computer-use experiment assignment, `copilot -p` sessions list no plugin skills and a `skill` call returns "Skill not found". Interactive sessions, the hooks, and the agents are unaffected.
+
+Run `setup-pstack` to change model defaults, set a reasoning effort per role (for example `arena runners: opus @xhigh, fable @max`, which Claude Code dispatches through the plugin's `pstack:effort-<level>` or `pstack:poteto-agent-<level>` agents; roles without a level keep the session's effort unless the sheet's `default effort` line names one), or turn automatic routing off. The plugin installs the routing hook on Claude Code, Codex, and GitHub Copilot; Codex asks you to trust it through `/hooks` before it runs. On Pi the extension injects the same routing instruction. In Claude Code and the Copilot CLI, use `/pstack:setup-pstack`. For skills-only installs and other runtimes, see [shared installation](docs/reference.md#shared-skills-installation).
 
 ## Use it with Herdr
 
@@ -75,8 +88,10 @@ pstack has no server or telemetry. Anything its skills ask your agent to read, i
 ## Attribution
 
 - pstack and Poteto Mode by Lauren Tan ([poteto](https://github.com/poteto)), MIT.
-- pstack-claude, the Claude Code and Codex port, by [Michael Denyer](https://github.com/michael-denyer).
+- pstack-claude, the Claude Code, Codex, Pi, and GitHub Copilot port, by [Michael Denyer](https://github.com/michael-denyer).
 - Imported cursor-team-kit skills by Cursor, MIT.
 - Herdr by [herdrdev](https://github.com/herdrdev/herdr), Apache-2.0. It is an external runtime, not vendored or relicensed here.
 
 This fork's changes are also [MIT-licensed](LICENSE). See [NOTICE.md](NOTICE.md) and [LICENSE-cursor-team-kit](LICENSE-cursor-team-kit).
+
+To support maintenance of the upstream port, [buy its maintainer a coffee](https://buymeacoffee.com/codenyer).

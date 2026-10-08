@@ -5,6 +5,8 @@ description: "Keep a reviewable decision trail for long-running or unattended wo
 
 # Show me your work
 
+On GitHub Copilot, read the [platform mapping](../poteto-mode/references/copilot-tools.md), including its per-skill notes, before following this skill.
+
 On Herdr, read the [Herdr execution mapping](../poteto-mode/references/herdr-tools.md), including its per-skill notes, before following this skill.
 
 Keep one canonical log.
