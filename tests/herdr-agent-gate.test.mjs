@@ -19,8 +19,8 @@ function fixture({ herdr = false, bun = false, bunInHome = false, dispatcher = t
   const plugin = join(root, 'plugin');
   mkdirSync(bin);
   mkdirSync(home);
-  mkdirSync(join(plugin, 'skills', 'poteto-mode', 'scripts'), { recursive: true });
-  if (dispatcher) writeFileSync(join(plugin, 'skills', 'poteto-mode', 'scripts', 'herdr-dispatch.ts'), '');
+  mkdirSync(join(plugin, 'skills', 'poteto-mode', 'scripts', 'herdr'), { recursive: true });
+  if (dispatcher) writeFileSync(join(plugin, 'skills', 'poteto-mode', 'scripts', 'herdr', 'dispatch.ts'), '');
   const stub = (path) => {
     writeFileSync(path, '#!/bin/sh\nexit 0\n');
     chmodSync(path, 0o755);
@@ -53,10 +53,10 @@ test('inside Herdr with herdr and bun on PATH the Agent tool is denied', () => {
   const decision = out.hookSpecificOutput;
   assert.equal(decision.hookEventName, 'PreToolUse');
   assert.equal(decision.permissionDecision, 'deny');
-  assert.ok(decision.permissionDecisionReason.includes(`${fx.bin}/bun ${fx.plugin}/skills/poteto-mode/scripts/herdr-dispatch.ts`));
+  assert.ok(decision.permissionDecisionReason.includes(`${fx.bin}/bun ${fx.plugin}/skills/poteto-mode/scripts/herdr/dispatch.ts`));
   assert.ok(decision.permissionDecisionReason.includes(`${fx.plugin}/skills/poteto-mode/references/herdr-tools.md`));
   assert.match(decision.permissionDecisionReason, /restart Claude Code with PSTACK_HERDR_ALLOW_NATIVE_AGENT=1/);
-  assert.ok(decision.permissionDecisionReason.includes(`${fx.bin}/bun ${fx.plugin}/skills/poteto-mode/scripts/herdr-dispatch.ts --next <agent-name>`));
+  assert.ok(decision.permissionDecisionReason.includes(`${fx.bin}/bun ${fx.plugin}/skills/poteto-mode/scripts/herdr/dispatch.ts --next <agent-name>`));
   assert.match(decision.permissionDecisionReason, /never sleep and re-check/);
 });
 
@@ -64,7 +64,7 @@ test('a bun that lives only in ~/.bun/bin is named by full path', () => {
   const fx = fixture({ herdr: true, bunInHome: true });
   const out = run({ HERDR_ENV: '1' }, fx);
   assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
-  assert.ok(out.hookSpecificOutput.permissionDecisionReason.includes(`${fx.home}/.bun/bin/bun ${fx.plugin}/skills/poteto-mode/scripts/herdr-dispatch.ts`));
+  assert.ok(out.hookSpecificOutput.permissionDecisionReason.includes(`${fx.home}/.bun/bin/bun ${fx.plugin}/skills/poteto-mode/scripts/herdr/dispatch.ts`));
 });
 
 test('a missing dispatcher allows the Agent tool with a note instead of a dead command', () => {

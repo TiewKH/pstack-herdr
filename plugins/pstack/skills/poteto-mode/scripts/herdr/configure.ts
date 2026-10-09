@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { ensureDependenciesInstalled } from "./bootstrap.ts";
+import { ensureDependenciesInstalled } from "../bootstrap.ts";
 import {
   buildRoutes,
   expandHome,
@@ -10,7 +10,7 @@ import {
   parseSetupInput,
   renderRoutesYaml,
   writeRoutesAtomic,
-} from "./herdr-config.ts";
+} from "./config.ts";
 
 interface Options {
   input: string;

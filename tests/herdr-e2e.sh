@@ -31,7 +31,7 @@ export HERDR_AGENT=claude
 herdr pane report-agent "$HERDR_PANE_ID" \
   --source custom:pstack-herdr-ci --agent claude --state idle >/dev/null
 
-# herdr-dispatch.ts believes a done/idle verdict only once a transcript under
+# herdr/dispatch.ts believes a done/idle verdict only once a transcript under
 # $CLAUDE_CONFIG_DIR/projects records the prompt (turnEvidence), so this stand-in
 # writes one after each prompt, the same shape a real Claude Code session writes.
 transcript_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/pstack-herdr-e2e"
@@ -80,7 +80,7 @@ if [[ -z "$pane" || "$pane" == "null" ]]; then
   exit 1
 fi
 
-command="HERDR_ENV=1 PSTACK_HERDR_PARENT_KIND=claude PATH='$PATH' bun '$ROOT/plugins/pstack/skills/poteto-mode/scripts/herdr-dispatch.ts' --role explorer --name ci-explorer --kind claude --cwd '$ROOT' --prompt 'pstack-herdr-e2e' --wait --timeout 15000 > '$RESULT' 2>&1; code=\$?; echo PSTACK_HERDR_E2E_EXIT:\$code"
+command="HERDR_ENV=1 PSTACK_HERDR_PARENT_KIND=claude PATH='$PATH' bun '$ROOT/plugins/pstack/skills/poteto-mode/scripts/herdr/dispatch.ts' --role explorer --name ci-explorer --kind claude --cwd '$ROOT' --prompt 'pstack-herdr-e2e' --wait --timeout 15000 > '$RESULT' 2>&1; code=\$?; echo PSTACK_HERDR_E2E_EXIT:\$code"
 herdr pane run "$pane" "$command" >/dev/null
 herdr pane wait-output "$pane" --regex 'PSTACK_HERDR_E2E_EXIT:[0-9]+' --timeout 30000 >/dev/null
 

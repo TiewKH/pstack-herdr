@@ -51,7 +51,7 @@ if (!agentGate) throw new Error("hooks.json must gate the Agent tool with herdr-
 if (!mapping.includes("herdr-agent-gate.sh") || !mapping.includes("PSTACK_HERDR_ALLOW_NATIVE_AGENT")) {
   throw new Error("Herdr mapping does not document the Agent gate and its bypass");
 }
-if (!mapping.includes("herdr-dispatch.ts")) throw new Error("Herdr mapping does not point to dispatcher");
+if (!mapping.includes("herdr/dispatch.ts")) throw new Error("Herdr mapping does not point to dispatcher");
 if (!mapping.includes("| `how` |") || !mapping.includes("| Feature / bug-fix")) {
   throw new Error("Herdr mapping is missing per-skill notes");
 }
@@ -68,14 +68,14 @@ for (const skill of skills) {
   if (!body.includes("herdr-tools.md")) {
     throw new Error(`${skill} does not point at the Herdr mapping`);
   }
-  if (body.includes("Under Herdr") || body.includes("Outside Herdr") || body.includes("herdr-dispatch")) {
+  if (body.includes("Under Herdr") || body.includes("Outside Herdr") || body.includes("herdr/dispatch")) {
     throw new Error(`${skill} dual-paths Herdr instead of using the mapping`);
   }
 }
 for (const playbook of playbooks) {
   const body = read(`plugins/pstack/skills/poteto-mode/playbooks/${playbook}.md`);
   if (
-    body.includes("herdr-dispatch") ||
+    body.includes("herdr/dispatch") ||
     body.includes("Under Herdr") ||
     body.includes("Outside Herdr") ||
     body.includes("HERDR_ENV")
@@ -107,7 +107,7 @@ if (routes.includes("workspace:") || routes.includes("round-robin") || routes.in
 if (!setup.includes("If `HERDR_ENV=1`, follow **Herdr setup**")) {
   throw new Error("setup-pstack does not branch on Herdr runtime");
 }
-if (!setup.includes("configure-herdr.ts") || !setup.includes("Do not write YAML yourself.")) {
+if (!setup.includes("herdr/configure.ts") || !setup.includes("Do not write YAML yourself.")) {
   throw new Error("setup-pstack does not delegate Herdr config writes to the deterministic script");
 }
 if (!setup.includes("~/.config/pstack-herdr/routes.yaml")) {

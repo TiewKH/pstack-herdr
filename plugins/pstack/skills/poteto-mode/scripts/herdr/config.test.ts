@@ -9,7 +9,7 @@ import {
   renderRoutesYaml,
   writeRoutesAtomic,
   type RoutesConfig,
-} from "./herdr-config.ts";
+} from "./config.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -210,7 +210,7 @@ describe("herdr deterministic setup", () => {
 
   test("committed setup example is valid input", () => {
     const example = readFileSync(
-      join(import.meta.dir, "../../../../../config/setup.example.json"),
+      join(import.meta.dir, "../../../../../../config/setup.example.json"),
       "utf8"
     );
     const config = buildRoutes({}, parseSetupInput(example));
@@ -264,7 +264,7 @@ async function runConfigure(
   args: string[]
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const proc = Bun.spawn(
-    ["bun", join(import.meta.dir, "configure-herdr.ts"), ...args],
+    ["bun", join(import.meta.dir, "configure.ts"), ...args],
     {
       cwd: import.meta.dir,
       stdout: "pipe",

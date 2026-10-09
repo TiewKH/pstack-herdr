@@ -11,7 +11,7 @@ import {
 import { connect, type Socket } from "node:net";
 import { constants, homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { ensureDependenciesInstalled } from "./bootstrap.ts";
+import { ensureDependenciesInstalled } from "../bootstrap.ts";
 import {
   CONFIG_HOMES,
   expandHome,
@@ -21,7 +21,7 @@ import {
   type AgentKind,
   type Profile,
   type RoutesConfig,
-} from "./herdr-config.ts";
+} from "./config.ts";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
