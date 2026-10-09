@@ -2,7 +2,7 @@
 
 [pstack](https://github.com/cursor/plugins/tree/main/pstack) for Claude Code and Codex, with delegated agents running as visible [Herdr](https://github.com/herdrdev/herdr) panes.
 
-This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the Claude Code, Codex, Pi, and GitHub Copilot port of Lauren Tan's pstack. It has 58 Agent Skills: 34 public skills and 24 `principle-*` leaves. The skill tree is synced against upstream `2cbf585` from `cursor/plugins/pstack`.
+This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the Claude Code, Codex, Pi, and GitHub Copilot port of Lauren Tan's pstack. It has 58 Agent Skills: 34 public skills and 24 `principle-*` leaves. The skill tree is synced against upstream `df58112` from `cursor/plugins/pstack`.
 
 Inside Herdr (`HERDR_ENV=1`), workflows that delegate start real Claude Code or Codex workers in Herdr panes, routed by role. You can watch and answer each worker. Outside Herdr, the plugin behaves like pstack-claude.
 
