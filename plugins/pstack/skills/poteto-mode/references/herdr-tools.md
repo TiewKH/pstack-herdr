@@ -1,6 +1,6 @@
 # Herdr execution mapping
 
-When `HERDR_ENV=1`, pstack delegation uses the executable `scripts/herdr-dispatch.ts`. Do not use Claude Code `Agent`/`Task` or Codex `spawn_agent` for a delegation that this dispatcher can represent.
+When `HERDR_ENV=1`, pstack delegation uses the executable `scripts/herdr/dispatch.ts`. Do not use Claude Code `Agent`/`Task` or Codex `spawn_agent` for a delegation that this dispatcher can represent.
 
 This is a structural runtime rule, not a session-start hint. Skills and playbooks keep their native spawn language. This file is the translation, the same way `codex-tools.md` is the Codex translation.
 
@@ -14,7 +14,7 @@ A `PreToolUse` hook on `Agent` (`herdr-agent-gate.sh` under the plugin hooks dir
 
 | pstack / Claude action | Herdr equivalent |
 |------------------------|------------------|
-| Dispatch a subagent (`Agent` / `Task`) | `herdr-dispatch.ts` |
+| Dispatch a subagent (`Agent` / `Task`) | `herdr/dispatch.ts` |
 | Dispatch N parallel subagents in one turn | N dispatcher processes launched concurrently without `--wait`, then `--next` |
 | `subagent_type` | ignored; pass the semantic pstack `--role` |
 | `model` | omit unless overriding; `--role` selects a profile from `~/.config/pstack-herdr/routes.yaml` |
@@ -28,7 +28,7 @@ A `PreToolUse` hook on `Agent` (`herdr-agent-gate.sh` under the plugin hooks dir
 Write substantial worker prompts to a temporary file, then invoke:
 
 ```bash
-bun <poteto-mode>/scripts/herdr-dispatch.ts \
+bun <poteto-mode>/scripts/herdr/dispatch.ts \
   --role <role> \
   --name <unique-agent-name> \
   --prompt-file <brief.md> \
@@ -47,7 +47,7 @@ For parallel fan-out, launch dispatcher processes concurrently rather than dispa
 Never sleep and re-check a worker. Block on `--next` instead:
 
 ```bash
-bun <poteto-mode>/scripts/herdr-dispatch.ts --next <name> [<name> ...] --timeout <ms>
+bun <poteto-mode>/scripts/herdr/dispatch.ts --next <name> [<name> ...] --timeout <ms>
 ```
 
 It returns as soon as any named worker settles. Herdr pushes each worker's status changes to it, and it reads a Codex worker's rollout every second. It reads and closes every worker that has settled, then prints `{"settled": [...], "pending": [...]}`. Each `settled` entry has the same fields as a `--collect` result, or `agent` and `error` when that worker could not be read. Act on each settled entry, then call `--next` again with the `pending` names until none are left. A budget that ends with nothing settled returns an empty `settled` and every name in `pending`. `--next` only watches. A stopped `--next` or one whose budget ends leaves every worker open, so a shell tool's own timeout loses no work. Pass each name to one `--next` at a time.
@@ -85,7 +85,7 @@ With `--wait`, the dispatcher returns JSON containing the Herdr agent name, pane
 `blocked: true` is not completion. Inspect the worker in Herdr and resolve the approval or question. `unknown` is not proof of completion; it is the status Herdr reported. `working` means the wait budget ran out with the worker still running. The dispatcher leaves `working`, `blocked`, and `unknown` panes open. Finish a `working` worker through the dispatcher, not raw `herdr` commands, so its pane closes when it is done:
 
 ```bash
-bun <poteto-mode>/scripts/herdr-dispatch.ts --collect --name <agent-name> --timeout <ms>
+bun <poteto-mode>/scripts/herdr/dispatch.ts --collect --name <agent-name> --timeout <ms>
 ```
 
 It returns the same settled JSON without `profile` and `depth`, and leaves the pane open again if the worker is still running when the budget ends. Close a pane with `herdr pane close <pane>` only when the work is no longer wanted. A dispatcher stopped by SIGTERM, SIGINT, or SIGHUP while it waits on a worker, in a dispatch or a `--collect`, closes that worker's pane before it exits; SIGKILL cannot be caught and still leaks the pane.

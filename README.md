@@ -66,7 +66,7 @@ Use poteto-mode to fix the search filter resetting when I change pages.
 | Layer | Owns |
 | --- | --- |
 | pstack skills | decomposition, roles, worktree isolation, synthesis, review, verification |
-| [`herdr-dispatch.ts`](plugins/pstack/skills/poteto-mode/scripts/herdr-dispatch.ts) | pane creation, profile environment, CLI startup, prompt delivery, waiting, output reads, pane cleanup, delegation depth |
+| [`herdr/dispatch.ts`](plugins/pstack/skills/poteto-mode/scripts/herdr/dispatch.ts) | pane creation, profile environment, CLI startup, prompt delivery, waiting, output reads, pane cleanup, delegation depth |
 | [`herdr-agent-gate.sh`](plugins/pstack/hooks/herdr-agent-gate.sh) | on Claude Code, denies the native `Agent` tool inside Herdr and returns the dispatcher command |
 | Herdr | panes, agent status, visibility |
 | Claude Code, Codex | the delegated work |

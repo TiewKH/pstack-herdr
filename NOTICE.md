@@ -62,7 +62,7 @@ Summary of structural changes inherited by this fork:
 
 This fork adds Herdr as an execution transport. Playbooks keep their native spawn language; `references/herdr-tools.md` is the Herdr translation the same way `codex-tools.md` is the Codex translation. Herdr-specific authored files include:
 
-- `plugins/pstack/skills/poteto-mode/scripts/herdr-dispatch.ts`
+- `plugins/pstack/skills/poteto-mode/scripts/herdr/dispatch.ts`
 - `plugins/pstack/skills/poteto-mode/references/herdr-tools.md`
 - `config/routes.example.yaml`
 - `tests/herdr-runtime.test.mjs`

@@ -21,7 +21,7 @@ Do not configure both layers unless the user explicitly wants native fallback be
 Herdr-backed delegation reads `~/.config/pstack-herdr/routes.yaml`. Do not hand-author that file. The deterministic writer is:
 
 ```bash
-bun ../poteto-mode/scripts/configure-herdr.ts --input <setup.json>
+bun ../poteto-mode/scripts/herdr/configure.ts --input <setup.json>
 ```
 
 The setup skill owns discovery and user choices. The script owns validation, canonical serialization, preservation rules, atomic writes, and idempotency.
@@ -122,7 +122,7 @@ Do not write YAML yourself.
 Preview the exact canonical YAML first:
 
 ```bash
-bun ../poteto-mode/scripts/configure-herdr.ts \
+bun ../poteto-mode/scripts/herdr/configure.ts \
   --input <setup.json> \
   --dry-run
 ```
@@ -130,7 +130,7 @@ bun ../poteto-mode/scripts/configure-herdr.ts \
 Then apply it:
 
 ```bash
-bun ../poteto-mode/scripts/configure-herdr.ts \
+bun ../poteto-mode/scripts/herdr/configure.ts \
   --input <setup.json>
 ```
 

@@ -9,7 +9,7 @@ import {
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { loadRoutes, parseRoutes, type RoutesConfig } from "./herdr-config.ts";
+import { loadRoutes, parseRoutes, type RoutesConfig } from "./config.ts";
 import {
   agentStatus,
   applyReadonlyPrompt,
@@ -36,7 +36,7 @@ import {
   type DispatchOptions,
   type HerdrExec,
   type StatusWatch,
-} from "./herdr-dispatch.ts";
+} from "./dispatch.ts";
 
 const config: RoutesConfig = {
   profiles: {

@@ -174,7 +174,7 @@ Install dependencies for the workflows you use:
 | Dependency | When you need it |
 | --- | --- |
 | GitHub CLI, `gh` | PR monitoring and shipping. Authenticate with `gh auth login`. |
-| Bun | The bundled `watch-pr`, `orch`, and `herdr-dispatch.ts` scripts. Their bootstrap installs script dependencies on first run. |
+| Bun | The bundled `watch-pr`, `orch`, and `herdr` scripts. Their bootstrap installs script dependencies on first run. |
 | Herdr | Visible delegated workers. See [HERDR.md](../HERDR.md). |
 | Graphite CLI, `gt` | The Orchestrate playbook and `orch` stack frontier. Shipping and autopilot playbooks use `gh` or Origin's CLI when available. |
 | `plugin-dev` | Claude Code skill-authoring guidance used by `automate-me`, `reflect`, and `poteto-mode`. |

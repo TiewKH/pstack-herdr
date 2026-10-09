@@ -2,6 +2,17 @@
 
 This file is the release changelog, with one `## <version> - <title>` entry per release, newest first. The Cursor-to-Claude rewrite rules live in [`tools/substitutions.json`](tools/substitutions.json), and the [sync boundary](CONTRIBUTING.md#the-sync-boundary) in `CONTRIBUTING.md` defines how a change to upstream's skill content is declared.
 
+## 0.9.77 - pstack-herdr: move the Herdr scripts into their own folder
+
+The Herdr scripts move from the flat `poteto-mode/scripts/` directory into `poteto-mode/scripts/herdr/`, following upstream's layout for `orch/` and `watch-pr/`, where a tool's folder carries its name and the files inside drop it:
+
+- `herdr-dispatch.ts` is now `herdr/dispatch.ts`.
+- `herdr-config.ts` is now `herdr/config.ts`.
+- `configure-herdr.ts` is now `herdr/configure.ts`.
+- Each test moves beside its script.
+
+The scripts keep the shared `bootstrap.ts`, `package.json`, and `tsconfig.json`, and their behavior does not change. `herdr-tools.md`, `setup-pstack`, the Agent gate, `HERDR.md`, the tests, and CI's Herdr dispatch job name the new paths. A session that started before the update and still runs an old path gets a missing-file error from `bun` until it reads `herdr-tools.md` again.
+
 ## 0.9.76 - pstack-herdr: merge pstack-claude 0.9.75
 
 This release merges `michael-denyer/pstack-claude` 0.9.70 through 0.9.75 into the fork. It brings in the GitHub Copilot runtime (plugin manifest, hooks, `copilot-tools.md`, and the Copilot setup path), the `/poteto-help` skill and the `cursor/plugins` pin at `2cbf585` (v0.15.13), Feature delegates whose worktrees start from the branch's `HEAD`, per-task fallback todolists, bounded Autopilot verify rounds, and fail-closed fixes in `watch-pr`, `orch`, `worktree-audit`, `sync`, and the release gate. The fork keeps the Herdr dispatcher, `--next`, the Agent gate, routes, and the real Herdr CI job. Upstream touched none of them.
