@@ -32,6 +32,16 @@ const rules = [
     phrase: "or `.claude/skills/verify-*/` from an older generator",
   },
   {
+    source: "#71 formal skill must not take the driver name",
+    file: "create-formal-verification-skill/SKILL.md",
+    phrase: "never `verify` or a `verify-` prefix, which belong to the driver skill `/create-verification-skill` writes",
+  },
+  {
+    source: "#71 formal maintainer skips the driver skill",
+    file: "maintain-formal-verification-skill/SKILL.md",
+    phrase: "The project `verify` skill that `/create-verification-skill` writes drives the app and is not one.",
+  },
+  {
     source: "#72 task fallback keeps skipped steps",
     file: "poteto-mode/SKILL.md",
     phrase: "with the playbook steps verbatim and each `skip: <reason>` line",
@@ -109,7 +119,7 @@ const rules = [
   {
     source: "autopilot verify loop: only findings the diff causes go back",
     file: "poteto-mode/playbooks/autopilot-full.md",
-    phrase: "A finding blocks the merge only when the diff causes it",
+    phrase: "A defect trunk shows without the PR is recorded against trunk and does not gate the PR",
   },
   {
     source: "autopilot verify loop: bounded rounds",

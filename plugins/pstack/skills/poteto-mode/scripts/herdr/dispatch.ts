@@ -563,7 +563,7 @@ function transcriptsSince(root: string, since: number): string[] {
 }
 
 // Codex writes `$CODEX_HOME/sessions/<date>/rollout-*.jsonl`; Claude writes
-// `$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<session-id>.jsonl`. Both store the user
+// `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/<cwd-slug>/<session-id>.jsonl`. Both store the user
 // turn as a JSON string, so the escaped first line of the prompt is what to look for.
 // Two concurrent workers given the same first line and the same CLI can vouch for each
 // other; a Claude worker is pinned to its own session id when Herdr reports one.
