@@ -1,18 +1,19 @@
 import { spawnSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 
-import { noticeOf, OUTPUT_CAP_BYTES, truncateUtf8 } from "./agent-text.ts";
+import { noticeOf, OUTPUT_CAP_BYTES, statusText, truncateUtf8 } from "./agent-text.ts";
 import type { AgentParams } from "./agent-tools.ts";
-import { alive, type ChildExit, PiChild, terminateGroup } from "./child.ts";
-import { DEPTH_FLAG, GENERAL_PURPOSE, loadAgentTypes, PSTACK_STATE_DIR, readSheet, resolveModel, type Settings } from "./config.ts";
+import { type Activity, alive, type ChildExit, PiChild, terminateGroup } from "./child.ts";
+import { checkEffort, DEPTH_FLAG, GENERAL_PURPOSE, loadAgentTypes, PSTACK_STATE_DIR, readSheet, resolveModel, type Settings } from "./config.ts";
 import { ensureWorktree, planWorktree, settleWorktree, type Worktree, worktreeSchema } from "./worktree.ts";
 
 const ENTRY_TYPE = "pstack-agents";
+const STATUS_KEY = "pstack-agents";
 // Claude Code lets agents nest three layers below the main session and withholds
 // the Agent tool at the third.
 const MAX_SPAWN_DEPTH = 3;
@@ -78,8 +79,10 @@ interface Run {
 
 // A remote agent runs under the live pi process that restore left it to.
 type LocalAgent = { kind: "local"; record: RunningRecord; run: Run };
+// Unverified restores retry identity checks; interrupted ones await termination.
 type AgentState = LocalAgent
   | { kind: "remote"; record: RunningRecord }
+  | { kind: "unverified"; record: RunningRecord }
   | { kind: "interrupted"; record: RunningRecord }
   | { kind: "ended"; record: EndedRecord };
 
@@ -105,6 +108,17 @@ function saveOutput(identity: AgentIdentity, text: string): Pick<EndedRecord, "f
     return { finalText: capped, outputFile };
   } catch (e) {
     return { finalText: `${capped}\n\n(full output not saved: ${(e as Error).message})` };
+  }
+}
+
+// Pi names the file <timestamp>_<session id>.jsonl, reopens it on a resume,
+// and writes it only once the first message is in.
+export function sessionFile({ sessionDir, sessionId }: AgentIdentity): string | undefined {
+  try {
+    const name = readdirSync(sessionDir).find((n) => n.endsWith(`_${sessionId}.jsonl`));
+    return name && join(sessionDir, name);
+  } catch {
+    return undefined;
   }
 }
 
@@ -169,8 +183,8 @@ function fateOf(record: RunningRecord): Fate {
 
 // Stops an orphan, by its group so the bash command it has running goes too.
 // No other fate is signalled: a pid that may have been reused is not ours to hit.
-function reapOrphan(record: RunningRecord, killGraceMs: number): void {
-  if (record.pid !== undefined) terminateGroup(record.pid, () => fateOf(record) === "orphan", killGraceMs);
+function reapOrphan(record: RunningRecord, killGraceMs: number): Promise<void> {
+  return record.pid === undefined ? Promise.resolve() : terminateGroup(record.pid, () => fateOf(record) === "orphan", killGraceMs);
 }
 
 const now = () => new Date().toISOString();
@@ -180,6 +194,9 @@ export class AgentRunner {
   // Set once the session tears its agents down; a launch after that would
   // start a child nothing stops.
   private closed = false;
+  // The footer of the top-level session only: a child's status would go to its
+  // parent's stdout, which the reader ignores.
+  private ui?: ExtensionContext["ui"];
 
   constructor(
     private readonly pi: ExtensionAPI,
@@ -193,6 +210,8 @@ export class AgentRunner {
     if (!def) throw new Error(`Unknown subagent_type "${type}". Valid types: ${[...types.keys()].join(", ")}.`);
     const parentModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
     const model = resolveModel(params.model ?? def.model, this.settings, readSheet(this.settings.agentDir), parentModel);
+    // Claude Code subagents without an effort run at the session's effort.
+    const thinking = params.effort === undefined ? this.pi.getThinkingLevel() : checkEffort(params.effort, this.settings);
 
     const id = `a${randomBytes(8).toString("hex")}`;
     const state = join(this.settings.agentDir, PSTACK_STATE_DIR, ctx.sessionManager.getSessionId());
@@ -205,8 +224,7 @@ export class AgentRunner {
       description: params.description,
       subagentType: type,
       model,
-      // Claude Code subagents without an effort run at the session's effort.
-      thinking: def.effort ?? this.pi.getThinkingLevel(),
+      thinking,
       readonly: params.readonly || undefined,
       sessionId: randomUUID(),
       sessionDir,
@@ -215,6 +233,7 @@ export class AgentRunner {
       worktree,
       startedAt: now(),
     };
+    this.attachUi(ctx);
     return this.launch(identity, params.prompt, params.run_in_background === true);
   }
 
@@ -234,7 +253,7 @@ export class AgentRunner {
     const child = new PiChild(
       command,
       [...args, "--extension", join(this.settings.pluginRoot, "pi", "index.ts"), "--skill", join(this.settings.pluginRoot, "skills"), ...childArgs(identity, this.settings.depth)],
-      { cwd: identity.cwd, exitGraceMs: this.settings.exitGraceMs },
+      { cwd: identity.cwd, exitGraceMs: this.settings.exitGraceMs, onActivity: () => this.showStatus() },
       prompt,
     );
     const pidStart = child.pid === undefined ? undefined : inspect(child.pid)?.start;
@@ -242,7 +261,25 @@ export class AgentRunner {
     const run: Run = { child, background, done: child.exited.then((exit) => this.finish(identity, run, exit)) };
     this.agents.set(identity.id, { kind: "local", record, run });
     this.persist(record);
+    this.showStatus();
     return record;
+  }
+
+  // From session_start too: a reloaded session can resume an agent with
+  // send_message before any agent call.
+  attachUi(ctx: ExtensionContext): void {
+    if (ctx.hasUI && this.settings.depth === 0) this.ui = ctx.ui;
+  }
+
+  private showStatus(): void {
+    const running = this.locals().map(({ record, run }) => ({ id: record.agent.id, at: run.child.activity?.at ?? record.agent.startedAt, activity: run.child.activity }));
+    this.ui?.setStatus(STATUS_KEY, statusText(running));
+  }
+
+  // A running agent's live activity, which only a local one has.
+  activityOf(agent: AgentIdentity): Activity | undefined {
+    const state = this.agents.get(agent.id);
+    return state?.kind === "local" ? state.run.child.activity : undefined;
   }
 
   // Pi appends a path it cannot find as the prompt text itself.
@@ -269,10 +306,11 @@ export class AgentRunner {
     };
     this.agents.set(identity.id, { kind: "ended", record });
     this.persist(record);
+    this.showStatus();
     // The model that called stop_agent already has the result, so a stop's
     // notice joins the context without starting another turn.
     if (run.background && run.ending !== "teardown") {
-      this.pi.sendMessage(noticeOf(record), status !== "stopped" ? { triggerTurn: true, deliverAs: "steer" } : { triggerTurn: false });
+      this.pi.sendMessage(noticeOf(record, sessionFile(identity)), status !== "stopped" ? { triggerTurn: true, deliverAs: "steer" } : { triggerTurn: false });
     }
     return record;
   }
@@ -312,12 +350,12 @@ export class AgentRunner {
 
   // An agent this process can act on. One running under another pi process is
   // not: only that process holds its stdin and can message or stop it.
-  private owned(to: string): Exclude<AgentState, { kind: "remote" | "interrupted" }> {
+  private owned(to: string): Exclude<AgentState, { kind: "remote" | "unverified" | "interrupted" }> {
     const state = this.find(to);
     if (state.kind === "remote") {
       throw new Error(`Agent ${state.record.agent.id} is running under another pi process (pid ${state.record.parentPid}); only that process can message or stop it.`);
     }
-    if (state.kind === "interrupted") {
+    if (state.kind === "unverified" || state.kind === "interrupted") {
       throw new Error(`Agent ${state.record.agent.id}'s previous process (pid ${state.record.pid}) has not exited; it cannot resume or be stopped here until its exit is confirmed.`);
     }
     return state;
@@ -354,6 +392,7 @@ export class AgentRunner {
   async stopAll(): Promise<void> {
     this.closed = true;
     await Promise.all(this.locals().map((state) => this.stop(state.record.agent.id, "teardown")));
+    this.ui?.setStatus(STATUS_KEY, undefined);
   }
 
   // For an exit that cannot wait: SIGTERM lets each child pi stop its own agents.
@@ -380,10 +419,19 @@ export class AgentRunner {
     if (fate === "kept" && state.kind === "remote") return state;
     if (fate !== "gone") {
       if (state.kind === "interrupted") return state;
-      const interrupted: AgentState = { kind: "interrupted", record };
-      this.agents.set(record.agent.id, interrupted);
-      reapOrphan(record, this.settings.killGraceMs);
-      return interrupted;
+      const restored: AgentState = {
+        kind: fate === "orphan" ? "interrupted" : "unverified",
+        record,
+      };
+      this.agents.set(record.agent.id, restored);
+      if (restored.kind === "interrupted") {
+        void reapOrphan(record, this.settings.killGraceMs).then(() => {
+          if (this.agents.get(record.agent.id) === restored) {
+            this.agents.set(record.agent.id, { kind: "unverified", record });
+          }
+        });
+      }
+      return restored;
     }
     const stopped: EndedRecord = {
       agent: record.agent,

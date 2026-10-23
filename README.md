@@ -2,15 +2,17 @@
 
 [pstack](https://github.com/cursor/plugins/tree/main/pstack) for Claude Code and Codex, with delegated agents running as visible [Herdr](https://github.com/herdrdev/herdr) panes.
 
-This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the Claude Code, Codex, Pi, and GitHub Copilot port of Lauren Tan's pstack. It has 58 Agent Skills: 34 public skills and 24 `principle-*` leaves. The skill tree is synced against upstream `df58112` from `cursor/plugins/pstack`.
+This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the Claude Code, Codex, Pi, GitHub Copilot, and Muse port of Lauren Tan's pstack. It has 65 Agent Skills: 41 public skills and 24 `principle-*` leaves. The skill tree is synced against upstream `7b353f7` from `cursor/plugins/pstack`.
 
 Inside Herdr (`HERDR_ENV=1`), workflows that delegate start real Claude Code or Codex workers in Herdr panes, routed by role. You can watch and answer each worker. Outside Herdr, the plugin behaves like pstack-claude.
 
-For concurrency bugs and invariants that tests cannot reach, see the separate [agent-formal-verify](https://github.com/michael-denyer/agent-formal-verify) plugin, which adds TLA+ model checking and Lean proofs.
+For concurrency bugs and invariants that tests cannot reach, `/create-formal-verification-skill` picks the riskiest property in your code, verifies it with a tool that fits, and leaves a project skill the next agent reruns. The separate [agent-formal-verify](https://github.com/michael-denyer/agent-formal-verify) plugin goes deeper on the method, with guided TLA+ model checking, Lean proofs, and Kani for Rust.
 
 ## Install
 
 ### Claude Code
+
+Run in Claude Code 2.1.292 or later:
 
 ```text
 /plugin marketplace add TiewKH/pstack-herdr
@@ -47,7 +49,40 @@ This installs pstack for the Copilot CLI and the GitHub Copilot app, which share
 
 The Copilot build is tested on Copilot CLI 1.0.87 through 1.0.92. On those versions the routing hook's context reaches the session alongside other plugins' session-start context. If a later version keeps only one plugin's context, `setup-pstack` offers a [standing instruction](plugins/pstack/skills/setup-pstack/copilot.md#wire-it-in) for `~/.copilot/copilot-instructions.md` instead. On 1.0.92, once the CLI caches its computer-use experiment assignment, `copilot -p` sessions list no plugin skills and a `skill` call returns "Skill not found". Interactive sessions, the hooks, and the agents are unaffected.
 
-Run `setup-pstack` to change model defaults, set a reasoning effort per role (for example `arena runners: opus @xhigh, fable @max`, which Claude Code dispatches through the plugin's `pstack:effort-<level>` or `pstack:poteto-agent-<level>` agents; roles without a level keep the session's effort unless the sheet's `default effort` line names one), or turn automatic routing off. The plugin installs the routing hook on Claude Code, Codex, and GitHub Copilot; Codex asks you to trust it through `/hooks` before it runs. On Pi the extension injects the same routing instruction. In Claude Code and the Copilot CLI, use `/pstack:setup-pstack`. For skills-only installs and other runtimes, see [shared installation](docs/reference.md#shared-skills-installation).
+### Muse
+
+Run in your terminal:
+
+```shell
+git clone https://github.com/TiewKH/pstack-herdr
+cd pstack-herdr
+muse plugins install ./plugins/pstack
+muse plugins approve pstack
+```
+
+The first command installs the native Muse plugin bundle. The second approves its `SessionStart` hook and agent definitions, which Muse runs only after approval. Start a new session afterwards. Invoke a skill with `/<name>` (for example `/poteto-mode`), which Muse lists for each user-invocable skill. Herdr delegation is verified from Claude Code and Codex coordinators only.
+
+### Other harnesses
+
+OpenCode (the CLI and the desktop app), Gemini CLI, Prime Agent, and skills-only Codex installs read skills from `~/.agents/skills/`. Run in your terminal:
+
+```shell
+git clone https://github.com/TiewKH/pstack-herdr
+cd pstack-herdr
+mkdir -p ~/.agents/skills
+for s in plugins/pstack/skills/*/; do
+  target=~/.agents/skills/"$(basename "$s")"
+  test -e "$target" || test -L "$target" || ln -s "$(pwd)/$s" "$target"
+done
+```
+
+To update, run `git pull` in the clone, then run the `for` loop again to link skills added since the last run. These installs have no routing hook, so ask for `poteto-mode` by name or add a standing instruction to the harness's instruction file. See [shared installation](docs/reference.md#shared-skills-installation) for per-harness notes and uninstalling.
+
+### Configure
+
+pstack routes tasks to `poteto-mode` automatically. At session start, a hook injects an instruction that points the agent at it: the plugin's hook on Claude Code, Codex, GitHub Copilot, and Muse, and the pstack extension on Pi. Codex runs the hook only after you trust it through `/hooks`, and Muse only after `muse plugins approve pstack`. Other harnesses have no hook.
+
+Run `setup-pstack` to turn automatic routing on or off, change model defaults, or set a reasoning effort per role (`arena runners: opus @xhigh, fable @max`). In Claude Code and the Copilot CLI, use `/pstack:setup-pstack`.
 
 ## Use it with Herdr
 
@@ -88,10 +123,10 @@ pstack has no server or telemetry. Anything its skills ask your agent to read, i
 ## Attribution
 
 - pstack and Poteto Mode by Lauren Tan ([poteto](https://github.com/poteto)), MIT.
-- pstack-claude, the Claude Code, Codex, Pi, and GitHub Copilot port, by [Michael Denyer](https://github.com/michael-denyer).
-- Imported cursor-team-kit skills by Cursor, MIT.
+- pstack-claude, the Claude Code, Codex, Pi, GitHub Copilot, and Muse port, by [Michael Denyer](https://github.com/michael-denyer).
+- Imported cursor-team-kit and thermos skills by Cursor, MIT.
 - Herdr by [herdrdev](https://github.com/herdrdev/herdr), Apache-2.0. It is an external runtime, not vendored or relicensed here.
 
-This fork's changes are also [MIT-licensed](LICENSE). See [NOTICE.md](NOTICE.md) and [LICENSE-cursor-team-kit](LICENSE-cursor-team-kit).
+This fork's changes are also [MIT-licensed](LICENSE). See [NOTICE.md](NOTICE.md), [LICENSE-cursor-team-kit](LICENSE-cursor-team-kit), and [LICENSE-thermos](LICENSE-thermos).
 
 To support maintenance of the upstream port, [buy its maintainer a coffee](https://buymeacoffee.com/codenyer).

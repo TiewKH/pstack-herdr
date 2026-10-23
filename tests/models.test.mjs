@@ -70,7 +70,8 @@ describe("parseModels", () => {
     const arena = role(resolved, "arena runners");
     expect(arena.tier).toBe("panel");
     expect(arena.models).toEqual(raw.tiers.panel);
-    expect(role(resolved, "bug-fix").models).toEqual([raw.tiers.strongest]);
+    expect(role(resolved, "feature, refactoring").models).toEqual([raw.tiers.worker]);
+    expect(role(resolved, "strongest judgment").models).toEqual([raw.tiers.strongest]);
   });
 
   test("a missing top-level key throws naming it", () => {
@@ -78,7 +79,7 @@ describe("parseModels", () => {
     expect(parse((p) => delete p.codex)).toThrow('models.json: "codex" must be an object');
   });
 
-  test.each(["default", "strongest", "panel"])("a missing %s tier throws naming it, since a stamped region renders from it", (tier) => {
+  test.each(["default", "strongest", "worker", "panel"])("a missing %s tier throws naming it, since a stamped region renders from it", (tier) => {
     expect(
       parse((p) => {
         delete p.tiers[tier];
@@ -169,6 +170,13 @@ describe("parseModels", () => {
   test("a codex block that misses or adds a tier throws naming the tier", () => {
     expect(parse((p) => delete p.codex.strongest)).toThrow('models.json: codex has no example for tier "strongest"');
     expect(parse((p) => (p.codex.fastest = "gpt"))).toThrow('models.json: codex names "fastest", which is not a tier');
+  });
+
+  test("a muse block that misses or adds a tier throws naming the tier", () => {
+    expect(parse((p) => delete p.muse)).toThrow('models.json: "muse" must be an object');
+    expect(parse((p) => delete p.muse.worker)).toThrow('models.json: muse has no example for tier "worker"');
+    expect(parse((p) => (p.muse.fastest = "muse-spark"))).toThrow('models.json: muse names "fastest", which is not a tier');
+    expect(parse((p) => (p.muse.panel = ["a", "a"]))).toThrow('models.json: muse "panel" lists "a" twice');
   });
 });
 

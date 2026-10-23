@@ -18,7 +18,7 @@ A `PreToolUse` hook on `Agent` (`herdr-agent-gate.sh` under the plugin hooks dir
 | Dispatch N parallel subagents in one turn | N dispatcher processes launched concurrently without `--wait`, then `--next` |
 | `subagent_type` | ignored; pass the semantic pstack `--role` |
 | `model` | omit unless overriding; `--role` selects a profile from `~/.config/pstack-herdr/routes.yaml` |
-| reasoning effort (no Claude `Agent`/`Task` equivalent) | omit unless overriding; a routed profile's `effort` becomes `--effort <level>` for Claude workers or `-c model_reasoning_effort="<level>"` for Codex workers |
+| `effort` (a role's `@level`) | omit unless overriding with `--effort <level>`; a routed profile's `effort` becomes `--effort <level>` for Claude workers or `-c model_reasoning_effort="<level>"` for Codex workers |
 | `readonly: true` | `--readonly` |
 | `readonly: false` because Claude Ask mode strips MCP | still pass `--readonly`; it disables write tools and does not use Ask/plan mode |
 | `isolation: "worktree"` / exclusive branch | caller creates the worktree or branch, then passes it as `--cwd` |
