@@ -8,7 +8,7 @@
     },
     "plugins/pstack/skills/architect/SKILL.md": {
       "kind": "policy",
-      "why": "Requires comparing accepted deviations with the saved sketch and rationale, and updating them, before each implementation unit closes.",
+      "why": "Requires comparing accepted deviations with the saved sketch and rationale, and updating them, before each implementation unit closes. It also points a Herdr coordinator (`HERDR_ENV=1`) at herdr-tools.md before it delegates.",
       "since": "0.9.34",
       "upstream": "not-proposed"
     },

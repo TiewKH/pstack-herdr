@@ -73,13 +73,31 @@ for (const skill of skills) {
     throw new Error(`${skill} dual-paths Herdr instead of using the mapping`);
   }
 }
-// A skill that names a concrete dispatch field delegates, so it must reach the Herdr mapping.
+// A skill that mentions delegation either points at the Herdr mapping or says here why it needs no pointer,
+// so every new upstream skill that mentions delegation forces that decision.
+const noHerdrPointer = {
+  babysit: "says a subagent that opens a PR hands back to its parent; starts none",
+  "figure-it-out": "fans out through poteto-mode, which it reads first and which points at the mapping",
+  ketchup: "summarizes subagent reports; starts none",
+  "poteto-help": "explains where subagents spend tokens; starts none",
+  "principle-build-the-lever": "principle leaf; starts none",
+  "principle-guard-the-context-window": "principle leaf; starts none",
+  "principle-separate-before-serializing-shared-state": "principle leaf; starts none",
+  "setup-pstack": "writes the Herdr routes itself; starts no worker",
+  statechart: "names a TLA+ worker process; starts none",
+  "thermo-nuclear-code-quality-review": "fans out only through swarm, which points at the mapping",
+};
+const delegation = /subagent_type|run_in_background|\b[Ss]pawn(s|ing|ed)?\b|\bsubagents?\b|\b[Ff]ans? out\b|\bworkers?\b/;
 for (const entry of readdirSync(join(root, "plugins/pstack/skills"))) {
   const path = join(root, "plugins/pstack/skills", entry, "SKILL.md");
   if (!existsSync(path)) continue;
   const body = readFileSync(path, "utf8");
-  if (/subagent_type:|run_in_background/.test(body) && !body.includes("herdr-tools.md")) {
-    throw new Error(`${entry} delegates but does not point at the Herdr mapping`);
+  const points = body.includes("herdr-tools.md");
+  if (delegation.test(body) && !points && !(entry in noHerdrPointer)) {
+    throw new Error(`${entry} mentions delegation but neither points at the Herdr mapping nor has a noHerdrPointer reason`);
+  }
+  if (entry in noHerdrPointer && (points || !delegation.test(body))) {
+    throw new Error(`${entry} no longer needs its noHerdrPointer entry`);
   }
 }
 for (const playbook of playbooks) {
