@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +12,7 @@ const hook = read("plugins/pstack/hooks/session-start-context.md");
 const routes = read("config/routes.example.yaml");
 const setup = read("plugins/pstack/skills/setup-pstack/SKILL.md");
 const skills = [
+  "architect",
   "how",
   "why",
   "arena",
@@ -23,6 +24,7 @@ const skills = [
   "show-me-your-work",
   "recall",
   "no-comments",
+  "thermos",
 ];
 const playbooks = [
   "feature",
@@ -55,7 +57,7 @@ if (!mapping.includes("herdr/dispatch.ts")) throw new Error("Herdr mapping does 
 if (!mapping.includes("| `how` |") || !mapping.includes("| Feature / bug-fix")) {
   throw new Error("Herdr mapping is missing per-skill notes");
 }
-for (const skill of ["automate-me", "maintain-verification-skill", "show-me-your-work", "recall", "no-comments"]) {
+for (const skill of ["automate-me", "maintain-verification-skill", "show-me-your-work", "recall", "no-comments", "thermos"]) {
   if (!mapping.includes("| `" + skill + "` |")) {
     throw new Error(`Herdr mapping is missing delegated skill note: ${skill}`);
   }
@@ -68,8 +70,39 @@ for (const skill of skills) {
   if (!body.includes("herdr-tools.md")) {
     throw new Error(`${skill} does not point at the Herdr mapping`);
   }
-  if (body.includes("Under Herdr") || body.includes("Outside Herdr") || body.includes("herdr/dispatch")) {
-    throw new Error(`${skill} dual-paths Herdr instead of using the mapping`);
+}
+// A skill that mentions delegation either points at the Herdr mapping or says here why it needs no pointer,
+// so every new upstream skill that mentions delegation forces that decision.
+const noHerdrPointer = {
+  babysit: "says a subagent that opens a PR hands back to its parent; starts none",
+  "figure-it-out": "fans out through poteto-mode, which it reads first and which points at the mapping",
+  ketchup: "summarizes subagent reports; starts none",
+  "poteto-help": "explains where subagents spend tokens; starts none",
+  "principle-build-the-lever": "principle leaf; starts none",
+  "principle-guard-the-context-window": "principle leaf; starts none",
+  "principle-separate-before-serializing-shared-state": "principle leaf; starts none",
+  "setup-pstack": "writes the Herdr routes itself; starts no worker",
+  statechart: "names a TLA+ worker process; starts none",
+  "thermo-nuclear-code-quality-review": "fans out only through swarm, which points at the mapping",
+};
+const skillDirs = readdirSync(join(root, "plugins/pstack/skills"));
+for (const entry of Object.keys(noHerdrPointer)) {
+  if (!skillDirs.includes(entry)) throw new Error(`noHerdrPointer names ${entry}, which is not a skill`);
+}
+const delegation = /subagent_type|run_in_background|\b[Ss]pawn(s|ing|ed)?\b|\bsubagents?\b|\b[Ff]ans? out\b|\bworkers?\b/;
+for (const entry of skillDirs) {
+  const path = join(root, "plugins/pstack/skills", entry, "SKILL.md");
+  if (!existsSync(path)) continue;
+  const body = readFileSync(path, "utf8");
+  const points = body.includes("herdr-tools.md");
+  if (points && (body.includes("Under Herdr") || body.includes("Outside Herdr") || body.includes("herdr/dispatch"))) {
+    throw new Error(`${entry} dual-paths Herdr instead of using the mapping`);
+  }
+  if (delegation.test(body) && !points && !(entry in noHerdrPointer)) {
+    throw new Error(`${entry} mentions delegation but neither points at the Herdr mapping nor has a noHerdrPointer reason`);
+  }
+  if (entry in noHerdrPointer && (points || !delegation.test(body))) {
+    throw new Error(`${entry} no longer needs its noHerdrPointer entry`);
   }
 }
 for (const playbook of playbooks) {

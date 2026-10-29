@@ -52,7 +52,7 @@ describe("committed models.json", () => {
     const text = readFileSync(join(skillsDir, "setup-pstack/SKILL.md"), "utf8");
     expect(text).toContain("- Herdr Claude worker IDs: Opus 5.5 (`claude-opus-5-5`), ");
     expect(text).toContain("Sonnet 5.5 (`claude-sonnet-5-5`), Sonnet 5 (`claude-sonnet-5`)");
-    expect(text).toContain("- Herdr Codex worker IDs: GPT-6.1-Sol (`gpt-6.1-sol`), GPT-6-Sol (`gpt-6-sol`), ");
+    expect(text).toContain("- Herdr Codex worker IDs: GPT-6.1-Sol (`gpt-6.1-sol`), GPT-6.1-Terra (`gpt-6.1-terra`), GPT-6-Sol (`gpt-6-sol`), ");
   });
 });
 

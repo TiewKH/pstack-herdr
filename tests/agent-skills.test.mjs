@@ -28,6 +28,8 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const skillsDir = join(repoRoot, "plugins/pstack/skills");
 const requiredPortableFiles = [
   "poteto-mode/references/agents/comment-sicko.md",
+  "poteto-mode/references/agents/thermo-nuclear-review-subagent.md",
+  "poteto-mode/references/agents/thermo-nuclear-code-quality-review-subagent.md",
   "poteto-mode/references/licenses/LICENSE",
   "poteto-mode/references/licenses/LICENSE-cursor-team-kit",
   "poteto-mode/references/licenses/LICENSE-thermos",
