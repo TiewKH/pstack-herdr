@@ -102,7 +102,7 @@ Most skills need only the table above. These need one more mapping:
 |-------|----------|
 | `how` | Explorers and the simple explainer use `--role explorer --readonly`. The complex synthesizer uses `--role judgment --readonly`. |
 | `why` | Investigators use `--role explorer --readonly`. The synthesizer uses `--role judgment --readonly`. Do not skip `--readonly` to preserve MCP; the flag does not use Ask mode. |
-| `interrogate` | Reviewers use `--role reviewer --readonly`. Keep panel diversity through routing profiles or `--model`. |
+| `interrogate` | Adversaries use `--role reviewer` without `--readonly`, each with its own worktree as `--cwd`, because they write repros there. Keep panel diversity through routing profiles or `--model`. |
 | `arena` | Candidates use `--role arena-candidate` with an isolated `--cwd`. The judge uses `--role arena-judge --readonly`. |
 | `swarm` | Writers use `--role implementation`. Read-only workers use `--role explorer --readonly` or `--role verifier --readonly`. |
 | `reflect` | Reviewers use `--role reviewer --readonly`. The synthesizer uses `--role judgment --readonly`. |
@@ -111,6 +111,7 @@ Most skills need only the table above. These need one more mapping:
 | `show-me-your-work` | The cross-model audit uses `--role reviewer --readonly`. When the skill requires a different model family, deliberately choose a suitable configured profile or `--model` override instead of relying on `spread`. |
 | `recall` | Transcript-slice workers use `--role explorer --readonly`, launched concurrently. Keep raw transcript reads inside the workers and return only the requested summaries. |
 | `no-comments` | Use `--role reviewer --readonly`. Build the worker brief from `poteto-mode/references/agents/comment-sicko.md` plus the requested scope; Herdr has no Claude `subagent_type`, so do not silently drop that reviewer contract. |
+| `thermos` | Both reviewers use `--role reviewer --readonly`, launched concurrently without `--wait` and collected with `--next`. Build each brief from `plugins/pstack/agents/thermo-nuclear-review-subagent.md` or `thermo-nuclear-code-quality-review-subagent.md` plus the same scoped diff and file contents; Herdr has no Claude `subagent_type`, so do not silently drop either reviewer contract. |
 | Feature / bug-fix / refactoring / perf-issue / hillclimb | Implementation delegates use `--role implementation`, or `difficult-implementation` for concurrency, algorithms, or cross-cutting work, with an exclusive writer `--cwd`. |
 | Eval | Candidates use `--role arena-candidate` in sanitized directories. The judge uses `--role arena-judge --readonly`. |
 | Orchestrate / autopilot | Owners that must themselves delegate use `--role subcoordinator`. Direct writers use `--role implementation`. Verifiers use `--role verifier --readonly`. |

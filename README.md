@@ -2,11 +2,15 @@
 
 [pstack](https://github.com/cursor/plugins/tree/main/pstack) for Claude Code and Codex, with delegated agents running as visible [Herdr](https://github.com/herdrdev/herdr) panes.
 
-This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the Claude Code, Codex, Pi, GitHub Copilot, and Muse port of Lauren Tan's pstack. It has 65 Agent Skills: 41 public skills and 24 `principle-*` leaves. The skill tree is synced against upstream `7b353f7` from `cursor/plugins/pstack`.
+This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the Claude Code, Codex, Pi, GitHub Copilot, and Muse port of Lauren Tan's pstack. It has 67 Agent Skills: 43 public skills and 24 `principle-*` leaves. The skill tree is synced against upstream `ab1f702` from `cursor/plugins/pstack`.
 
 Inside Herdr (`HERDR_ENV=1`), workflows that delegate start real Claude Code or Codex workers in Herdr panes, routed by role. You can watch and answer each worker. Outside Herdr, the plugin behaves like pstack-claude.
 
 For concurrency bugs and invariants that tests cannot reach, `/create-formal-verification-skill` picks the riskiest property in your code, verifies it with a tool that fits, and leaves a project skill the next agent reruns. The separate [agent-formal-verify](https://github.com/michael-denyer/agent-formal-verify) plugin goes deeper on the method, with guided TLA+ model checking, Lean proofs, and Kani for Rust.
+
+## Built for Claude Code
+
+This port translates upstream's Cursor skills for Claude Code before installation. [Upstream's Claude Code install](https://github.com/cursor/plugins/tree/c742dd6/harness/pstack/claude-code) asks agents to translate Cursor names at runtime, using extra tokens and relying on them to apply the mapping correctly. This port also adds a SessionStart hook that routes tasks to `poteto-mode`.
 
 ## Install
 
@@ -18,6 +22,8 @@ Run in Claude Code 2.1.292 or later:
 /plugin marketplace add TiewKH/pstack-herdr
 /plugin install pstack@pstack-claude
 ```
+
+Claude Code leaves auto-update off for third-party marketplaces, so pstack stays on the version you installed. To turn it on, run `/plugin`, open the **Marketplaces** tab, select `pstack-claude`, and choose **Enable auto-update**. To update once by hand, run `claude plugin update pstack@pstack-claude`.
 
 ### Codex
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +23,7 @@ const skills = [
   "show-me-your-work",
   "recall",
   "no-comments",
+  "thermos",
 ];
 const playbooks = [
   "feature",
@@ -55,7 +56,7 @@ if (!mapping.includes("herdr/dispatch.ts")) throw new Error("Herdr mapping does 
 if (!mapping.includes("| `how` |") || !mapping.includes("| Feature / bug-fix")) {
   throw new Error("Herdr mapping is missing per-skill notes");
 }
-for (const skill of ["automate-me", "maintain-verification-skill", "show-me-your-work", "recall", "no-comments"]) {
+for (const skill of ["automate-me", "maintain-verification-skill", "show-me-your-work", "recall", "no-comments", "thermos"]) {
   if (!mapping.includes("| `" + skill + "` |")) {
     throw new Error(`Herdr mapping is missing delegated skill note: ${skill}`);
   }
@@ -70,6 +71,15 @@ for (const skill of skills) {
   }
   if (body.includes("Under Herdr") || body.includes("Outside Herdr") || body.includes("herdr/dispatch")) {
     throw new Error(`${skill} dual-paths Herdr instead of using the mapping`);
+  }
+}
+// A skill that names a concrete dispatch field delegates, so it must reach the Herdr mapping.
+for (const entry of readdirSync(join(root, "plugins/pstack/skills"))) {
+  const path = join(root, "plugins/pstack/skills", entry, "SKILL.md");
+  if (!existsSync(path)) continue;
+  const body = readFileSync(path, "utf8");
+  if (/subagent_type:|run_in_background/.test(body) && !body.includes("herdr-tools.md")) {
+    throw new Error(`${entry} delegates but does not point at the Herdr mapping`);
   }
 }
 for (const playbook of playbooks) {
