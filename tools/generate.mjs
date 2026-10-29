@@ -76,6 +76,14 @@ export const PORTABLE_ASSETS = [
     source: "plugins/pstack/agents/comment-sicko.md",
     target: "poteto-mode/references/agents/comment-sicko.md",
   },
+  {
+    source: "plugins/pstack/agents/thermo-nuclear-review-subagent.md",
+    target: "poteto-mode/references/agents/thermo-nuclear-review-subagent.md",
+  },
+  {
+    source: "plugins/pstack/agents/thermo-nuclear-code-quality-review-subagent.md",
+    target: "poteto-mode/references/agents/thermo-nuclear-code-quality-review-subagent.md",
+  },
   { source: "LICENSE", target: "poteto-mode/references/licenses/LICENSE" },
   {
     source: "LICENSE-cursor-team-kit",

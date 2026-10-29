@@ -352,7 +352,7 @@
     },
     "plugins/pstack/skills/thermos/SKILL.md": {
       "kind": "port-feature",
-      "why": "Points a Herdr coordinator (`HERDR_ENV=1`) at poteto-mode's herdr-tools.md before it delegates, so both reviewers start through the Herdr dispatcher with their agent contracts instead of the native Agent tool.",
+      "why": "Points a Herdr coordinator (`HERDR_ENV=1`) at poteto-mode's herdr-tools.md before it delegates, so both reviewers start through the Herdr dispatcher instead of the native Agent tool, with briefs built from the agent files that tools/generate.mjs copies under poteto-mode/references/agents.",
       "since": "0.9.112",
       "upstream": "not-proposed"
     }

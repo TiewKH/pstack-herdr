@@ -12,6 +12,7 @@ const hook = read("plugins/pstack/hooks/session-start-context.md");
 const routes = read("config/routes.example.yaml");
 const setup = read("plugins/pstack/skills/setup-pstack/SKILL.md");
 const skills = [
+  "architect",
   "how",
   "why",
   "arena",
@@ -69,9 +70,6 @@ for (const skill of skills) {
   if (!body.includes("herdr-tools.md")) {
     throw new Error(`${skill} does not point at the Herdr mapping`);
   }
-  if (body.includes("Under Herdr") || body.includes("Outside Herdr") || body.includes("herdr/dispatch")) {
-    throw new Error(`${skill} dual-paths Herdr instead of using the mapping`);
-  }
 }
 // A skill that mentions delegation either points at the Herdr mapping or says here why it needs no pointer,
 // so every new upstream skill that mentions delegation forces that decision.
@@ -87,12 +85,19 @@ const noHerdrPointer = {
   statechart: "names a TLA+ worker process; starts none",
   "thermo-nuclear-code-quality-review": "fans out only through swarm, which points at the mapping",
 };
+const skillDirs = readdirSync(join(root, "plugins/pstack/skills"));
+for (const entry of Object.keys(noHerdrPointer)) {
+  if (!skillDirs.includes(entry)) throw new Error(`noHerdrPointer names ${entry}, which is not a skill`);
+}
 const delegation = /subagent_type|run_in_background|\b[Ss]pawn(s|ing|ed)?\b|\bsubagents?\b|\b[Ff]ans? out\b|\bworkers?\b/;
-for (const entry of readdirSync(join(root, "plugins/pstack/skills"))) {
+for (const entry of skillDirs) {
   const path = join(root, "plugins/pstack/skills", entry, "SKILL.md");
   if (!existsSync(path)) continue;
   const body = readFileSync(path, "utf8");
   const points = body.includes("herdr-tools.md");
+  if (points && (body.includes("Under Herdr") || body.includes("Outside Herdr") || body.includes("herdr/dispatch"))) {
+    throw new Error(`${entry} dual-paths Herdr instead of using the mapping`);
+  }
   if (delegation.test(body) && !points && !(entry in noHerdrPointer)) {
     throw new Error(`${entry} mentions delegation but neither points at the Herdr mapping nor has a noHerdrPointer reason`);
   }

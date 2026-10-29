@@ -69,11 +69,13 @@ On Claude Code, a `PreToolUse` hook on `Agent` ([`herdr-agent-gate.sh`](plugins/
 These workflows delegate through the dispatcher:
 
 - Feature, Bug fix, Refactoring, Perf issue, Hillclimb, Eval, Autonomous run.
-- How, Why, Arena, Swarm, Interrogate, Reflect.
+- How, Why, Arena, Architect, Swarm, Interrogate, Reflect, Thermos.
 - Automate me, Recall, No comments, Show me your work, Maintain verification skill.
 - Orchestrate, Autopilot-full, Autopilot-stack.
 
-Architect reaches Herdr through How, Why, Arena, and Interrogate. Figure-it-out reaches it through Architect and the playbook it designs. `tests/herdr-runtime.test.mjs` fails when a fan-out skill stops pointing at `herdr-tools.md`, or when a playbook grows its own Herdr branch.
+Figure-it-out reaches Herdr through poteto-mode and the playbook it designs. `tests/herdr-runtime.test.mjs` fails when a skill that mentions spawning, subagents, workers, or fan-out neither points at `herdr-tools.md` nor has a `noHerdrPointer` reason in the test, when such a reason goes stale, and when a skill or playbook grows its own Herdr branch.
+
+Panels such as arena runners and interrogate reviewers take their models from the role's profile pool, not from `pstack-models.md`. Dispatch one worker per seat with no `--model`, and `spread` spreads the seats across the pool.
 
 ## Workflow safety
 
