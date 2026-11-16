@@ -791,16 +791,21 @@ function chooseProfile(
 
 // A background tab keeps the worker off the caller's screen; a split puts it
 // beside the caller, which is what you want when watching the worker matters.
+// `tab create` without --workspace opens in whichever workspace is focused, so a
+// worker follows its caller's workspace (HERDR_WORKSPACE_ID) instead.
+// `pane split --current` already splits the caller's own pane.
 export function placementArgs(
   options: Pick<DispatchOptions, "placement" | "direction" | "name">,
   cwd: string,
-  env: string[]
+  env: string[],
+  workspace?: string
 ): string[] {
   switch (options.placement) {
     case "tab":
       return [
         "tab",
         "create",
+        ...(workspace ? ["--workspace", workspace] : []),
         "--cwd",
         cwd,
         "--label",
@@ -926,7 +931,12 @@ export function planDispatch(
     ),
     prompt: turn ? `${prompt}\n\n${turn.needle}` : prompt,
     ...(turn ? { codexTurn: turn } : {}),
-    placeArgs: placementArgs(options, resolve(options.cwd), envFlags(childEnv)),
+    placeArgs: placementArgs(
+      options,
+      resolve(options.cwd),
+      envFlags(childEnv),
+      env.HERDR_WORKSPACE_ID || undefined
+    ),
     startTail: agentStartTail(
       kind,
       worker.model,
