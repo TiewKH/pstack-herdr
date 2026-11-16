@@ -376,7 +376,8 @@ export function effortAgentArgs(
   }
 }
 
-function agentStartTail(
+// The CLI flags a worker starts with; both Herdr runtimes pass them unchanged.
+export function agentArgs(
   kind: AgentKind,
   model: string | undefined,
   effort: string | undefined,
@@ -386,6 +387,16 @@ function agentStartTail(
   if (model && model !== "inherit" && model !== "auto")
     args.push("--model", model);
   args.push(...effortAgentArgs(kind, effort));
+  return args;
+}
+
+function agentStartTail(
+  kind: AgentKind,
+  model: string | undefined,
+  effort: string | undefined,
+  readonly: boolean
+): string[] {
+  const args = agentArgs(kind, model, effort, readonly);
   return args.length === 0 ? [] : ["--", ...args];
 }
 
@@ -409,6 +420,21 @@ function argSummary(args: string[]): string {
     .join(" ");
 }
 
+const SANDBOX_DENIAL =
+  /Operation not permitted|PermissionDenied|ECONNREFUSED|EPERM|EACCES/;
+
+// Both Herdr runtimes are reached over a local socket, which Codex's sandbox blocks
+// while its network is off. Codex marks such a command with
+// CODEX_SANDBOX_NETWORK_DISABLED=1, so a denial there gets the fix appended.
+export function sandboxHint(
+  detail: string,
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  if (env.CODEX_SANDBOX_NETWORK_DISABLED !== "1" || !SANDBOX_DENIAL.test(detail))
+    return detail;
+  return `${detail}\nThe Codex sandbox blocks the Herdr socket while its network is off. A Codex worker that delegates (a subcoordinator) needs network_access = true under [sandbox_workspace_write] in its $CODEX_HOME/config.toml, or a Claude profile for that role.`;
+}
+
 function herdrErrorCode(detail: string): string | undefined {
   try {
     const error = asObject(
@@ -429,7 +455,11 @@ async function runHerdrCommand(
   if (result.exitCode !== 0) {
     const detail =
       result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`;
-    throw new HerdrError(argSummary(args), detail, herdrErrorCode(detail));
+    throw new HerdrError(
+      argSummary(args),
+      sandboxHint(detail),
+      herdrErrorCode(detail)
+    );
   }
   return result;
 }
@@ -669,7 +699,7 @@ function resolvedPrompt(options: DispatchOptions): string {
   throw new Error("set --prompt or --prompt-file");
 }
 
-function defaultTimeout(
+export function defaultTimeout(
   config: RoutesConfig,
   timeout: number | undefined
 ): number {
@@ -781,13 +811,23 @@ export function placementArgs(
   }
 }
 
-// Everything the dispatch needs to know before it talks to Herdr.
-export function planDispatch(
+// The runtime-independent half of a dispatch: which profile, CLI, model, and
+// effort run the worker, at what depth, with what environment and prompt.
+export interface WorkerPlan {
+  profile: string;
+  kind: AgentKind;
+  model: string | undefined;
+  effort: string | undefined;
+  depth: number;
+  timeout: number;
+  childEnv: Record<string, string>;
+  prompt: string;
+}
+
+export function planWorker(
   options: DispatchOptions,
   env: NodeJS.ProcessEnv = process.env
-): DispatchPlan {
-  if (env.HERDR_ENV !== "1")
-    throw new Error("herdr-dispatch requires HERDR_ENV=1");
+): WorkerPlan {
   if (!AGENT_NAME.test(options.name))
     throw new Error("--name must match [a-z][a-z0-9_-]{0,31}");
   const config = loadRoutes(options.routes, env);
@@ -801,12 +841,48 @@ export function planDispatch(
     throw new Error(
       `model ${model} is a ${owner} model, but profile ${chosen.name} runs ${kind}`
     );
-  const childEnv = {
-    ...workerEnv(kind, chosen.profile.env, homedir(), env),
-    PSTACK_HERDR_DEPTH: String(nesting.next),
-    PSTACK_HERDR_PARENT_KIND: kind,
+  return {
+    profile: chosen.name,
+    kind,
+    model,
+    effort: options.effort ?? chosen.profile.effort,
+    depth: nesting.next,
+    timeout,
+    childEnv: {
+      ...workerEnv(kind, chosen.profile.env, homedir(), env),
+      PSTACK_HERDR_DEPTH: String(nesting.next),
+      PSTACK_HERDR_PARENT_KIND: kind,
+    },
+    prompt: applyReadonlyPrompt(resolvedPrompt(options), options.readonly),
   };
-  const prompt = applyReadonlyPrompt(resolvedPrompt(options), options.readonly);
+}
+
+// Herdr's terminal UI sets HERDR_ENV=1 in its panes; the Herdr app's terminals
+// (herdr-core) carry HC_TERMINAL_ID instead. A TUI pane inside an app terminal
+// is the inner runtime, so the TUI wins when both are set.
+export type HerdrRuntime = "tui" | "app";
+
+export function herdrRuntime(
+  env: NodeJS.ProcessEnv = process.env
+): HerdrRuntime | undefined {
+  if (env.HERDR_ENV === "1") return "tui";
+  if (env.HC_TERMINAL_ID) return "app";
+  return undefined;
+}
+
+export const OUTSIDE_HERDR =
+  "herdr-dispatch runs inside Herdr: a Herdr TUI pane (HERDR_ENV=1) or a Herdr app terminal (HC_TERMINAL_ID)";
+
+// Everything the dispatch needs to know before it talks to Herdr.
+export function planDispatch(
+  options: DispatchOptions,
+  env: NodeJS.ProcessEnv = process.env
+): DispatchPlan {
+  if (env.HERDR_ENV !== "1")
+    throw new Error("herdr-dispatch requires HERDR_ENV=1");
+  const worker = planWorker(options, env);
+  const { kind, childEnv, timeout } = worker;
+  const prompt = worker.prompt;
   const turn =
     kind === "codex"
       ? {
@@ -818,9 +894,9 @@ export function planDispatch(
         }
       : undefined;
   return {
-    profile: chosen.name,
+    profile: worker.profile,
     kind,
-    depth: nesting.next,
+    depth: worker.depth,
     timeout,
     startTimeout: Math.min(timeout, START_TIMEOUT_MAX_MS),
     deliveryWindow: parseNonNegativeInt(
@@ -833,8 +909,8 @@ export function planDispatch(
     placeArgs: placementArgs(options, resolve(options.cwd), envFlags(childEnv)),
     startTail: agentStartTail(
       kind,
-      model,
-      options.effort ?? chosen.profile.effort,
+      worker.model,
+      worker.effort,
       options.readonly
     ),
   };
@@ -1484,22 +1560,30 @@ async function main(): Promise<void> {
   const options = program.opts<
     DispatchOptions & { collect: boolean; next?: string[] }
   >();
+  const runtime = herdrRuntime();
+  if (!runtime) throw new Error(OUTSIDE_HERDR);
+  // The app runtime loads only inside the Herdr app, so the TUI path never imports it.
+  const app = runtime === "app" ? await import("./hc.ts") : undefined;
+  const print = (result: unknown) =>
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (options.next) {
     if (options.collect || options.name)
       throw new Error(
         "--next takes the agent names; drop --name and --collect"
       );
     // Nothing is owned while watching: a stopped --next leaves every worker open.
-    const result = await next({ ...options, names: options.next });
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    const nextOptions = { ...options, names: options.next };
+    print(app ? await app.nextApp(nextOptions) : await next(nextOptions));
     return;
   }
   if (!options.name) throw new Error("--name is required unless --next is set");
-  const own = closeOnSignal();
+  const own = app ? app.closeAppOnSignal() : closeOnSignal();
   if (options.collect) {
-    const result = await collect(options, process.env, spawnHerdr, own);
+    const result = app
+      ? await app.collectApp(options, process.env, undefined, undefined, own)
+      : await collect(options, process.env, spawnHerdr, own);
     own(undefined);
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    print(result);
     return;
   }
   if (!options.role)
@@ -1513,15 +1597,11 @@ async function main(): Promise<void> {
   if (options.placement !== "tab" && options.placement !== "split") {
     throw new Error("--placement must be tab or split");
   }
-  const result = await dispatch(
-    options,
-    process.env,
-    spawnHerdr,
-    turnEvidence,
-    own
-  );
+  const result = app
+    ? await app.dispatchApp(options, process.env, undefined, undefined, own)
+    : await dispatch(options, process.env, spawnHerdr, turnEvidence, own);
   own(undefined);
-  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  print(result);
 }
 
 if (import.meta.main) {

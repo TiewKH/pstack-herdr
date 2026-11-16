@@ -1,14 +1,34 @@
 # Herdr execution mapping
 
-When `HERDR_ENV=1`, pstack delegation uses the executable `scripts/herdr/dispatch.ts`. Do not use Claude Code `Agent`/`Task` or Codex `spawn_agent` for a delegation that this dispatcher can represent.
+When `HERDR_ENV=1` or `HC_TERMINAL_ID` is set, pstack delegation uses the executable `scripts/herdr/dispatch.ts`. Do not use Claude Code `Agent`/`Task` or Codex `spawn_agent` for a delegation that this dispatcher can represent.
 
 This is a structural runtime rule, not a session-start hint. Skills and playbooks keep their native spawn language. This file is the translation, the same way `codex-tools.md` is the Codex translation.
 
-The dispatcher calls the installed `herdr` binary itself and owns pane creation, profile environment, agent startup, prompt delivery, lifecycle waiting, output reads, and delegation depth.
+The dispatcher talks to Herdr itself and owns pane creation, profile environment, agent startup, prompt delivery, lifecycle waiting, output reads, and delegation depth.
+
+## Runtimes
+
+Herdr comes in two forms, and the dispatcher picks one from the environment. The commands, flags, roles, and JSON below are the same in both.
+
+| Runtime | Detected by | Workers run as |
+|---------|-------------|----------------|
+| Herdr TUI (`herdr`) | `HERDR_ENV=1` | Herdr panes, driven through the `herdr` binary |
+| Herdr app (`herdr-app` over `herdr-core`) | `HC_TERMINAL_ID` (with `HC_TERMINAL_SOCKET`) | `herdr-core` terminals, driven over the socket in `HC_TERMINAL_SOCKET` and shown as tabs in the app |
+
+A TUI pane opened inside an app terminal carries both variables; the TUI wins there because it is the inner runtime.
+
+In the Herdr app:
+
+- A worker is an `hc` terminal named `--name`, started with its brief as the CLI's launch prompt, so there is no readiness race and no retyping. Codex workers start with `--no-daemon`, as herdr-core requires.
+- `--placement tab` (the default) opens the worker as a background tab in the caller's space; `--placement split` puts it in the caller's tab. `--direction` is ignored; the app lays out splits. A caller with no space (an `hc` terminal outside the app) starts hidden workers; `hc attach <name>` shows one.
+- herdr-core starts programs with its own login environment, so the dispatcher passes the caller's `PATH` (and `PSTACK_HERDR_ROUTES`) with the profile's `env`.
+- Completion is the CLI's own status report: a worker is settled once its first turn ends (`done` or `idle` with a turn count above zero), `blocked`, `error`, or `exited` when its program ended. A Codex composer that reports `idle` while booting is not settled. Results carry `terminal` (the `hc` address) where the TUI carries `pane`; `paneClosed` means the worker's terminal was ended and removed.
+- `unknown` means the budget ended before the worker started its task, for example when a dialog waits before its first turn. Open its tab, answer it, and `--collect` the worker.
+- To end an app worker by hand, run `hc kill <name>` and then `hc rm <name>`.
 
 ## The Agent gate
 
-A `PreToolUse` hook on `Agent` (`herdr-agent-gate.sh` under the plugin hooks directory) enforces this mapping on Claude Code. With `HERDR_ENV=1`, and `herdr` and `bun` both found (`bun` on PATH or at `~/.bun/bin/bun`), it denies the call and returns the dispatcher command. If `herdr` or `bun` is missing it allows the call and says which one to install. Outside Herdr it is silent. `PSTACK_HERDR_ALLOW_NATIVE_AGENT=1` bypasses it for a delegation the dispatcher cannot represent.
+A `PreToolUse` hook on `Agent` (`herdr-agent-gate.sh` under the plugin hooks directory) enforces this mapping on Claude Code. With `HERDR_ENV=1`, and `herdr` and `bun` both found (`bun` on PATH or at `~/.bun/bin/bun`), it denies the call and returns the dispatcher command. In a Herdr app terminal (`HC_TERMINAL_ID`) it needs `bun` and `HC_TERMINAL_SOCKET` instead of `herdr`. If one is missing it allows the call and says which. Outside Herdr it is silent. `PSTACK_HERDR_ALLOW_NATIVE_AGENT=1` bypasses it for a delegation the dispatcher cannot represent.
 
 ## Tool actions
 
@@ -84,7 +104,13 @@ The caller chooses `--cwd`. Read-only workers may share the current checkout. Co
 
 A profile's `env` reaches the worker pane as `--env` flags, except a config home equal to the CLI's default (`CLAUDE_CONFIG_DIR=~/.claude`, `CODEX_HOME=~/.codex`), which the dispatcher drops unless the shell that started Herdr exports a different home for that variable. Claude Code keeps its onboarding state in `$CLAUDE_CONFIG_DIR/.claude.json` once the variable is set, so a worker given the default home boots into first-run onboarding and the prompt lands on a menu. A separately authenticated home such as `~/.claude-a` still passes through; complete its onboarding once by hand.
 
+## Codex workers that delegate
+
+A worker that delegates reaches Herdr over a local socket, and Codex's `workspace-write` sandbox blocks that socket while its network is off. A Codex profile routed to `subcoordinator` therefore needs `network_access = true` under `[sandbox_workspace_write]` in that profile's `$CODEX_HOME/config.toml`. Without it, the nested dispatch fails with `Operation not permitted` (Herdr TUI) or `ECONNREFUSED` (Herdr app), and the dispatcher appends this fix to the error when Codex reports its sandbox network as disabled. Route the role to a Claude profile instead when the setting is not wanted.
+
 ## Result handling
+
+The prompt-delivery, transcript, and rollout checks below are how the TUI runtime proves a turn ran. The Herdr app runtime reads the CLI's own status and turn count instead, as **Runtimes** describes; its statuses, `--keep-pane`, `--collect`, and signal handling otherwise match.
 
 When the prompt is not accepted or not delivered, the dispatcher reads the worker's visible screen, closes the pane, and puts that screen in the error, so a stuck onboarding menu or trust prompt is visible from the caller.
 
@@ -96,11 +122,11 @@ With `--wait`, the dispatcher returns JSON containing the Herdr agent name, pane
 bun <poteto-mode>/scripts/herdr/dispatch.ts --collect --name <agent-name> --timeout <ms>
 ```
 
-It returns the same settled JSON without `profile` and `depth`, and leaves the pane open again if the worker is still running when the budget ends. Close a pane with `herdr pane close <pane>` only when the work is no longer wanted. A dispatcher stopped by SIGTERM, SIGINT, or SIGHUP while it waits on a worker, in a dispatch or a `--collect`, closes that worker's pane before it exits; SIGKILL cannot be caught and still leaks the pane.
+It returns the same settled JSON without `profile` and `depth`, and leaves the pane open again if the worker is still running when the budget ends. Close a pane with `herdr pane close <pane>` (in the app, `hc kill <name>` then `hc rm <name>`) only when the work is no longer wanted. A dispatcher stopped by SIGTERM, SIGINT, or SIGHUP while it waits on a worker, in a dispatch or a `--collect`, closes that worker's pane before it exits; SIGKILL cannot be caught and still leaks the pane.
 
 `--timeout` and `orchestration.default_timeout_ms` are one budget applied to `agent start` readiness (at most the 300000 ms Herdr accepts) and to the `agent wait` that follows a prompt. Before typing, the dispatcher waits for the worker to report idle (or `unknown` or `done` for Codex: Herdr 0.9.2+ never reports a ready Codex composer as idle, and 0.9.3 reads a fresh one as `done`), then counts the prompt delivered once the agent leaves idle (`working`, `blocked`, or, for Claude, `done`) within `PSTACK_HERDR_DELIVERY_WINDOW_MS` (default 8000), retrying the prompt once. A prompt that never lands is an error that carries the screen, never a `done` over an empty composer.
 
-The dispatcher refuses to run outside `HERDR_ENV=1` and refuses recursive delegation at the configured depth limit. It owns the pane through prompt acceptance; a start or prompt failure closes that pane.
+The dispatcher refuses to run outside Herdr (neither `HERDR_ENV=1` nor `HC_TERMINAL_ID`) and refuses recursive delegation at the configured depth limit. It owns the pane through prompt acceptance; a start or prompt failure closes that pane.
 
 ## Per-skill notes
 
@@ -127,4 +153,4 @@ Most skills need only the table above. These need one more mapping:
 
 ## Native fallback
 
-When `HERDR_ENV` is not `1`, follow the normal Claude Code behavior or the Codex mapping in `codex-tools.md`. Herdr is not contacted from outside a Herdr-managed pane.
+When `HERDR_ENV` is not `1` and `HC_TERMINAL_ID` is unset, follow the normal Claude Code behavior or the Codex mapping in `codex-tools.md`. Herdr is not contacted from outside a Herdr-managed pane or terminal.
