@@ -54,7 +54,7 @@ bun <poteto-mode>/scripts/herdr/dispatch.ts \
   --wait
 ```
 
-1. The dispatcher opens a background tab, starts the CLI, and waits for it to report idle. Herdr 0.9.2+ never reports a ready Codex composer as idle, so `unknown` and `done` also end the wait for a Codex worker. Herdr 0.9.3 reads a fresh Codex composer as `done`.
+1. The dispatcher opens a background tab in the caller's workspace (`HERDR_WORKSPACE_ID`), starts the CLI, and waits for it to report idle. Herdr 0.9.2+ never reports a ready Codex composer as idle, so `unknown` and `done` also end the wait for a Codex worker. Herdr 0.9.3 reads a fresh Codex composer as `done`.
 2. It types the prompt and counts it delivered once the agent leaves idle (for Codex, once it reads `working` or `blocked`, or its rollout quotes the prompt) within `PSTACK_HERDR_DELIVERY_WINDOW_MS` (default 8000 ms). It retries once. A prompt that is rejected or never lands closes the pane and puts the worker's last screen in the error.
 3. With `--wait`, it waits up to `--timeout` (default `orchestration.default_timeout_ms`, 180000 ms). `agent start` gets at most the 300000 ms Herdr accepts.
 4. For a Claude worker, a `done` or `idle` status counts only when the session file Herdr names, written after the prompt, quotes its first line. Without one, the dispatcher closes the pane and throws. Herdr reads a CLI that booted and stalled as a finished turn.

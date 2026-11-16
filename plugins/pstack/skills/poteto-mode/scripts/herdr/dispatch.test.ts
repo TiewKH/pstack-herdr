@@ -634,6 +634,27 @@ describe("herdr-dispatch Herdr sequence", () => {
     ]);
   });
 
+  test("a worker tab opens in the caller's workspace, not the focused one", () => {
+    expect(
+      placementArgs(
+        { placement: "tab", direction: "right", name: "w" },
+        "/repo",
+        [],
+        "w7"
+      ).slice(0, 4)
+    ).toEqual(["tab", "create", "--workspace", "w7"]);
+    expect(
+      planDispatch(options, { HERDR_ENV: "1", HERDR_WORKSPACE_ID: "w7" })
+        .placeArgs
+    ).not.toContain("--workspace");
+    expect(
+      planDispatch(
+        { ...options, placement: "tab" },
+        { HERDR_ENV: "1", HERDR_WORKSPACE_ID: "w7" }
+      ).placeArgs.slice(0, 4)
+    ).toEqual(["tab", "create", "--workspace", "w7"]);
+  });
+
   test("retries agent start while the fresh pane has no shell prompt yet", async () => {
     let attempts = 0;
     const { calls, exec } = scriptedExec({
