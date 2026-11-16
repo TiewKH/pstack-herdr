@@ -212,7 +212,10 @@ const DELIVERED: Record<AgentKind, AgentStatus[]> = {
   codex: ["working", "blocked"],
 };
 
-function asObject(value: unknown, label: string): Record<string, unknown> {
+export function asObject(
+  value: unknown,
+  label: string
+): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);
   }
@@ -309,16 +312,24 @@ export function inferParentKind(
   return undefined;
 }
 
-export function envFlags(env: Record<string, string>): string[] {
-  const flags: string[] = [];
-  for (const [key, value] of Object.entries(env)) {
+// Validated worker environment entries with `~` expanded, for either runtime.
+export function checkedEnv(
+  env: Record<string, string>
+): Array<[string, string]> {
+  return Object.entries(env).map(([key, value]) => {
     if (!ENV_NAME.test(key))
       throw new Error(`invalid environment variable name: ${key}`);
     if (/[\r\n]/.test(value))
       throw new Error(`environment ${key} contains a newline`);
-    flags.push("--env", `${key}=${expandHome(value)}`);
-  }
-  return flags;
+    return [key, expandHome(value)];
+  });
+}
+
+export function envFlags(env: Record<string, string>): string[] {
+  return checkedEnv(env).flatMap(([key, value]) => [
+    "--env",
+    `${key}=${value}`,
+  ]);
 }
 
 export function readonlyAgentArgs(kind: AgentKind): string[] {
@@ -420,8 +431,10 @@ function argSummary(args: string[]): string {
     .join(" ");
 }
 
+// A socket connect refused by the sandbox: Node reports `connect E...` (the app
+// runtime), and the herdr binary reports a bare `kind: PermissionDenied` OS error.
 const SANDBOX_DENIAL =
-  /Operation not permitted|PermissionDenied|ECONNREFUSED|EPERM|EACCES/;
+  /connect (ECONNREFUSED|EPERM|EACCES)\b|kind: PermissionDenied/;
 
 // Both Herdr runtimes are reached over a local socket, which Codex's sandbox blocks
 // while its network is off. Codex marks such a command with
@@ -430,7 +443,10 @@ export function sandboxHint(
   detail: string,
   env: NodeJS.ProcessEnv = process.env
 ): string {
-  if (env.CODEX_SANDBOX_NETWORK_DISABLED !== "1" || !SANDBOX_DENIAL.test(detail))
+  if (
+    env.CODEX_SANDBOX_NETWORK_DISABLED !== "1" ||
+    !SANDBOX_DENIAL.test(detail)
+  )
     return detail;
   return `${detail}\nThe Codex sandbox blocks the Herdr socket while its network is off. A Codex worker that delegates (a subcoordinator) needs network_access = true under [sandbox_workspace_write] in its $CODEX_HOME/config.toml, or a Claude profile for that role.`;
 }
@@ -824,9 +840,13 @@ export interface WorkerPlan {
   prompt: string;
 }
 
+// `inherited` is the environment the worker starts from, which decides whether a
+// default config home must be passed or can be dropped (see workerEnv). A TUI pane
+// starts from the caller's; an app terminal starts from herdr-core's.
 export function planWorker(
   options: DispatchOptions,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  inherited: NodeJS.ProcessEnv = env
 ): WorkerPlan {
   if (!AGENT_NAME.test(options.name))
     throw new Error("--name must match [a-z][a-z0-9_-]{0,31}");
@@ -849,7 +869,7 @@ export function planWorker(
     depth: nesting.next,
     timeout,
     childEnv: {
-      ...workerEnv(kind, chosen.profile.env, homedir(), env),
+      ...workerEnv(kind, chosen.profile.env, homedir(), inherited),
       PSTACK_HERDR_DEPTH: String(nesting.next),
       PSTACK_HERDR_PARENT_KIND: kind,
     },
@@ -1280,11 +1300,48 @@ export async function collect(
   };
 }
 
-// Herdr pushes each status change on the subscribed panes; any line after the
-// acknowledgement is only a cue to read state again.
-export async function watchStatus(
-  panes: string[],
-  env: NodeJS.ProcessEnv
+// Calls `handle` with each JSON message the socket sends, one per line. Lines that
+// are not JSON are skipped. A throwing handler destroys the socket instead of
+// escaping the event listener.
+export function onJsonLines(
+  socket: Socket,
+  handle: (message: Record<string, unknown>) => void
+): void {
+  let buffer = "";
+  socket.on("data", (chunk) => {
+    buffer += chunk.toString();
+    for (let at; (at = buffer.indexOf("\n")) >= 0; ) {
+      const line = buffer.slice(0, at);
+      buffer = buffer.slice(at + 1);
+      let message: unknown;
+      try {
+        message = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (typeof message !== "object" || message === null) continue;
+      try {
+        handle(message as Record<string, unknown>);
+      } catch (error) {
+        socket.destroy(
+          error instanceof Error ? error : new Error(String(error))
+        );
+        return;
+      }
+    }
+  });
+}
+
+// What a subscription message means: the acknowledgement, a cue to read state
+// again, a failed subscription, or nothing.
+export type WatchCue = "start" | "wake" | "fail" | "skip";
+
+// A status subscription on a socket. `changed` resolves on the next cue or after
+// `ms`; once the subscription is gone `live` is false and the caller polls.
+export async function socketWatch(
+  path: string | undefined,
+  request: Record<string, unknown>,
+  classify: (message: Record<string, unknown>, started: boolean) => WatchCue
 ): Promise<StatusWatch> {
   let subscribed = false;
   let closed = false;
@@ -1295,7 +1352,6 @@ export async function watchStatus(
     else dirty = true;
   };
   let socket: Socket | undefined;
-  const path = env.HERDR_SOCKET_PATH;
   if (path) {
     const opened = connect(path);
     socket = opened;
@@ -1309,43 +1365,23 @@ export async function watchStatus(
       };
       opened.on("error", end);
       opened.on("close", end);
-      opened.on("connect", () => {
-        opened.write(
-          `${JSON.stringify({
-            id: "pstack-herdr-next",
-            method: "events.subscribe",
-            params: {
-              subscriptions: panes.map((pane) => ({
-                type: "pane.agent_status_changed",
-                pane_id: pane,
-              })),
-            },
-          })}\n`
-        );
-      });
-      let buffer = "";
+      opened.on("connect", () => opened.write(`${JSON.stringify(request)}\n`));
       let started = false;
-      opened.on("data", (chunk) => {
-        buffer += chunk.toString();
-        for (let at; (at = buffer.indexOf("\n")) >= 0; ) {
-          const line = buffer.slice(0, at);
-          buffer = buffer.slice(at + 1);
-          let message: { result?: { type?: unknown }; error?: unknown };
-          try {
-            message = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          if (message.error !== undefined) {
-            opened.destroy();
-          } else if (!started) {
-            if (message.result?.type !== "subscription_started") continue;
+      onJsonLines(opened, (message) => {
+        switch (classify(message, started)) {
+          case "start":
             started = true;
             clearTimeout(timer);
             ready(true);
-          } else {
+            return;
+          case "wake":
             signal();
-          }
+            return;
+          case "fail":
+            opened.destroy();
+            return;
+          case "skip":
+            return;
         }
       });
     });
@@ -1378,6 +1414,33 @@ export async function watchStatus(
   };
 }
 
+// Herdr pushes each status change on the subscribed panes; any line after the
+// acknowledgement is only a cue to read state again.
+export function watchStatus(
+  panes: string[],
+  env: NodeJS.ProcessEnv
+): Promise<StatusWatch> {
+  return socketWatch(
+    env.HERDR_SOCKET_PATH,
+    {
+      id: "pstack-herdr-next",
+      method: "events.subscribe",
+      params: {
+        subscriptions: panes.map((pane) => ({
+          type: "pane.agent_status_changed",
+          pane_id: pane,
+        })),
+      },
+    },
+    (message, started) => {
+      if (message.error !== undefined) return "fail";
+      if (started) return "wake";
+      const result = message.result as { type?: unknown } | undefined;
+      return result?.type === "subscription_started" ? "start" : "skip";
+    }
+  );
+}
+
 interface NextWorker {
   name: string;
   pane: string;
@@ -1385,7 +1448,7 @@ interface NextWorker {
   record?: CodexTurnRecord;
 }
 
-function failure(name: string, error: unknown): CollectFailure {
+export function failure(name: string, error: unknown): CollectFailure {
   return {
     agent: name,
     error: error instanceof Error ? error.message : String(error),
@@ -1423,9 +1486,66 @@ async function probe(
   };
 }
 
+// Agent names hold no spaces, so a list zsh passed as one unsplit word is split here.
+export function nextNames(names: string[]): string[] {
+  const unique = [
+    ...new Set(names.flatMap((name) => name.split(/\s+/))),
+  ].filter(Boolean);
+  if (unique.length === 0) throw new Error("--next needs an agent name");
+  return unique;
+}
+
+export interface NextLoop<W extends { name: string }, R> {
+  // Finds a named worker; a throw settles it as a failure without waiting.
+  locate(name: string): Promise<W>;
+  watch(workers: W[]): Promise<StatusWatch>;
+  // Reads a worker once: a settled worker is collected, a running one is undefined.
+  probe(worker: W): Promise<R | undefined>;
+  // How long to sleep before reading the pending workers again.
+  pause(pending: W[], live: boolean): number;
+}
+
 // Waits for the first of several workers to settle, then collects every one that
 // has. It only watches, so a budget that ends or a stopped `--next` leaves every
-// worker open.
+// worker open. Both runtimes run this loop with their own reads.
+export async function firstSettled<W extends { name: string }, R>(
+  names: string[],
+  deadline: number,
+  loop: NextLoop<W, R>
+): Promise<{ settled: Array<R | CollectFailure>; pending: string[] }> {
+  const settled: Array<R | CollectFailure> = [];
+  let pending: W[] = [];
+  for (const name of names) {
+    try {
+      pending.push(await loop.locate(name));
+    } catch (error) {
+      settled.push(failure(name, error));
+    }
+  }
+  const unsettled = () => pending.map((worker) => worker.name);
+  if (settled.length > 0) return { settled, pending: unsettled() };
+  const watcher = await loop.watch(pending);
+  try {
+    for (;;) {
+      const running: W[] = [];
+      for (const worker of pending) {
+        const result = await loop
+          .probe(worker)
+          .catch((error: unknown) => failure(worker.name, error));
+        if (result) settled.push(result);
+        else running.push(worker);
+      }
+      pending = running;
+      const left = deadline - Date.now();
+      if (settled.length > 0 || left <= 0)
+        return { settled, pending: unsettled() };
+      await watcher.changed(Math.min(loop.pause(pending, watcher.live), left));
+    }
+  } finally {
+    watcher.close();
+  }
+}
+
 export async function next(
   options: NextOptions,
   env: NodeJS.ProcessEnv = process.env,
@@ -1434,73 +1554,67 @@ export async function next(
 ): Promise<NextResult> {
   if (env.HERDR_ENV !== "1")
     throw new Error("herdr-dispatch requires HERDR_ENV=1");
-  // Agent names hold no spaces, so a list zsh passed as one unsplit word is split here.
-  const names = [
-    ...new Set(options.names.flatMap((name) => name.split(/\s+/))),
-  ].filter(Boolean);
-  if (names.length === 0) throw new Error("--next needs an agent name");
+  const names = nextNames(options.names);
   const deadline =
     Date.now() +
     defaultTimeout(loadRoutes(options.routes, env), options.timeout);
-  const settled: NextResult["settled"] = [];
-  let pending: NextWorker[] = [];
-  for (const name of names) {
-    try {
+  return firstSettled<NextWorker, CollectResult>(names, deadline, {
+    async locate(name) {
       const { pane, kind } = agentLocation(
         await runHerdrJson(["agent", "get", name], exec)
       );
       const record =
         kind === "codex" ? loadTurnRecord(name, pane, env) : undefined;
-      pending.push({ name, pane, kind, record });
-    } catch (error) {
-      settled.push(failure(name, error));
-    }
-  }
-  const unsettled = () => pending.map((worker) => worker.name);
-  if (settled.length > 0) return { settled, pending: unsettled() };
-  const watcher = await watch(
-    pending.map((worker) => worker.pane),
-    env
-  );
-  try {
-    for (;;) {
-      const running: NextWorker[] = [];
-      for (const worker of pending) {
-        const result = await probe(worker, options.keepPane, env, exec).catch(
-          (error: unknown) => failure(worker.name, error)
-        );
-        if (result) settled.push(result);
-        else running.push(worker);
-      }
-      pending = running;
-      const left = deadline - Date.now();
-      if (settled.length > 0 || left <= 0)
-        return { settled, pending: unsettled() };
-      // Herdr cannot see a Codex turn end, so its rollout is read every second.
-      const codex = pending.some((worker) => worker.record);
-      await watcher.changed(
-        Math.min(
-          codex || !watcher.live ? TURN_POLL_MS : WATCH_HEARTBEAT_MS,
-          left
-        )
-      );
-    }
-  } finally {
-    watcher.close();
-  }
+      return { name, pane, kind, record };
+    },
+    watch: (workers) =>
+      watch(
+        workers.map((worker) => worker.pane),
+        env
+      ),
+    probe: (worker) => probe(worker, options.keepPane, env, exec),
+    // Herdr cannot see a Codex turn end, so its rollout is read every second.
+    pause: (pending, live) =>
+      pending.some((worker) => worker.record) || !live
+        ? TURN_POLL_MS
+        : WATCH_HEARTBEAT_MS,
+  });
 }
 
-// An interrupted dispatch or collect closes its worker's pane; nobody is left to read it.
-function closeOnSignal(): (pane: string | undefined) => void {
+// Signal cleanup gets this long before the dispatcher exits regardless.
+const SIGNAL_CLEANUP_MS = 5000;
+
+// Set once a signal arrives. The signal handler then owns the exit, so the
+// interrupted flow neither prints a result nor exits with its own error.
+let interrupted = false;
+
+// An interrupted dispatch or collect ends its worker; nobody is left to read it.
+// `cleanup` receives the owned worker (a pane, or an app terminal); a cleanup
+// that fails or hangs still lets the process exit.
+export function closeOnSignal(
+  cleanup: (owned: string) => unknown = (pane) =>
+    Bun.spawnSync(["herdr", "pane", "close", pane])
+): (owned: string | undefined) => void {
   let owned: string | undefined;
   for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
-    process.on(signal, () => {
-      if (owned) Bun.spawnSync(["herdr", "pane", "close", owned]);
-      process.exit(128 + constants.signals[signal]);
+    process.on(signal, async () => {
+      interrupted = true;
+      const code = 128 + constants.signals[signal];
+      const target = owned;
+      owned = undefined;
+      if (target) {
+        setTimeout(() => process.exit(code), SIGNAL_CLEANUP_MS).unref();
+        try {
+          await cleanup(target);
+        } catch {
+          // Exiting matters more than reporting a cleanup that could not finish.
+        }
+      }
+      process.exit(code);
     });
   }
-  return (pane) => {
-    owned = pane;
+  return (target) => {
+    owned = target;
   };
 }
 
@@ -1564,8 +1678,10 @@ async function main(): Promise<void> {
   if (!runtime) throw new Error(OUTSIDE_HERDR);
   // The app runtime loads only inside the Herdr app, so the TUI path never imports it.
   const app = runtime === "app" ? await import("./hc.ts") : undefined;
-  const print = (result: unknown) =>
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  const print = (result: unknown) => {
+    if (!interrupted)
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  };
   if (options.next) {
     if (options.collect || options.name)
       throw new Error(
@@ -1606,6 +1722,7 @@ async function main(): Promise<void> {
 
 if (import.meta.main) {
   main().catch((error) => {
+    if (interrupted) return;
     process.stderr.write(
       `${error instanceof Error ? error.message : String(error)}\n`
     );

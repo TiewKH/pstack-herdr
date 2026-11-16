@@ -4,22 +4,30 @@
 // that runs the CLI with its brief as the launch prompt, labelled into the
 // caller's space so the app shows it.
 
-import { connect, type Socket } from "node:net";
-import { constants } from "node:os";
+import { connect } from "node:net";
 import { resolve } from "node:path";
-import { loadRoutes, expandHome, type AgentKind } from "./config.ts";
+import { CONFIG_HOMES, loadRoutes, type AgentKind } from "./config.ts";
 import {
   agentArgs,
+  asObject,
+  checkedEnv,
+  closeOnSignal,
   defaultTimeout,
+  firstSettled,
+  nextNames,
+  onJsonLines,
   planWorker,
   sandboxHint,
+  socketWatch,
+  type CollectFailure,
   type DispatchOptions,
+  type StatusWatch,
   type WorkerPlan,
 } from "./dispatch.ts";
 
 // `unknown` is a worker that never started its task: it reports no turn and is not
 // working, which is how a CLI stuck on a dialog before its first turn looks.
-// `exited` is a CLI whose program ended.
+// `exited` is a CLI whose program ended or was lost.
 export type AppStatus =
   | "idle"
   | "working"
@@ -50,13 +58,8 @@ export interface AppCollectResult extends AppSettlement {
   kind: AgentKind;
 }
 
-export interface AppFailure {
-  agent: string;
-  error: string;
-}
-
 export interface AppNextResult {
-  settled: Array<AppCollectResult | AppFailure>;
+  settled: Array<AppCollectResult | CollectFailure>;
   pending: string[];
 }
 
@@ -65,18 +68,10 @@ export type HcRpc = (
   params: Record<string, unknown>
 ) => Promise<unknown>;
 
-// Wakes the caller when herdr-core reports a status, turn, or exit change on a
-// watched terminal. `live` is false once the subscription is gone.
-export interface AppWatch {
-  readonly live: boolean;
-  changed(ms: number): Promise<void>;
-  close(): void;
-}
-
 export type AppWatcher = (
   terminals: string[],
   env: NodeJS.ProcessEnv
-) => Promise<AppWatch>;
+) => Promise<StatusWatch>;
 
 export class HcError extends Error {
   readonly method: string;
@@ -90,31 +85,44 @@ export class HcError extends Error {
   }
 }
 
-interface Terminal {
+export interface Terminal {
   address: string;
   name: string | null;
   state: string;
   turn: number;
   status: { state?: string } | null;
   labels: Record<string, string>;
-  exitCode: number | null;
+  pid: number | null;
+  reason: string | null;
 }
 
 const OUTPUT_LINES = 240;
 const RPC_TIMEOUT_MS = 30000;
-const SUBSCRIBE_TIMEOUT_MS = 2000;
 // A live subscription wakes the wait on every change; this only bounds a missed event.
 const WATCH_HEARTBEAT_MS = 10000;
 const POLL_MS = 1000;
-const WAKING_EVENTS = new Set(["status", "turn", "finished", "removed", "lost"]);
-// Labels the dispatcher writes so --collect and --next know a terminal is a pstack worker.
+const WAKING_EVENTS = new Set([
+  "status",
+  "turn",
+  "finished",
+  "removed",
+  "lost",
+  "restarted",
+]);
+const WATCH_ID = "pstack-herdr-watch";
+// Labels the dispatcher writes: the CLI kind marks a pstack worker for --collect and
+// --next; the launch pid tells a kept terminal's replacement shell from the worker.
 const KIND_LABEL = "pstack.kind";
+const PID_LABEL = "pstack.pid";
 
 export function socketPath(env: NodeJS.ProcessEnv): string | undefined {
   return env.HC_TERMINAL_SOCKET || env.HC_SOCKET || undefined;
 }
 
-function requireApp(env: NodeJS.ProcessEnv): { caller: string; socket: string } {
+function requireApp(env: NodeJS.ProcessEnv): {
+  caller: string;
+  socket: string;
+} {
   const caller = env.HC_TERMINAL_ID;
   const socket = socketPath(env);
   if (!caller || !socket)
@@ -124,84 +132,117 @@ function requireApp(env: NodeJS.ProcessEnv): { caller: string; socket: string } 
   return { caller, socket };
 }
 
-function asRecord(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    throw new Error(`${label} must be an object`);
-  return value as Record<string, unknown>;
+function rpcError(method: string, error: unknown): HcError {
+  if (typeof error !== "object" || error === null)
+    return new HcError(method, String(error), undefined);
+  const record = error as Record<string, unknown>;
+  const data = (
+    typeof record.data === "object" && record.data !== null ? record.data : {}
+  ) as Record<string, unknown>;
+  const kind = typeof data.kind === "string" ? data.kind : undefined;
+  const detail = [record.message, data.hint ?? data.message]
+    .filter((part) => typeof part === "string" && part !== "")
+    .join(": ");
+  return new HcError(method, detail || JSON.stringify(error), kind);
 }
 
-// One JSON-RPC request per connection, one message per line.
-export function socketRpc(path: string, env: NodeJS.ProcessEnv = process.env): HcRpc {
+// One JSON-RPC request per connection, one message per line. A connection that
+// ends before the answer fails at once rather than at the timeout.
+export function socketRpc(
+  path: string,
+  env: NodeJS.ProcessEnv = process.env
+): HcRpc {
   return (method, params) =>
     new Promise((done, fail) => {
       const socket = connect(path);
-      let buffer = "";
-      const timer = setTimeout(() => {
-        socket.destroy();
-        fail(new HcError(method, `no answer within ${RPC_TIMEOUT_MS} ms`, "timeout"));
-      }, RPC_TIMEOUT_MS + Number(params.timeout ?? 0) * 1000);
-      const settle = (fn: () => void) => {
+      let settled = false;
+      const settle = (outcome: () => void) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
         socket.destroy();
-        fn();
+        outcome();
       };
+      const timer = setTimeout(
+        () =>
+          settle(() =>
+            fail(
+              new HcError(
+                method,
+                `no answer within ${RPC_TIMEOUT_MS} ms`,
+                "timeout"
+              )
+            )
+          ),
+        RPC_TIMEOUT_MS
+      );
       socket.on("connect", () =>
-        socket.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method, params })}\n`)
+        socket.write(
+          `${JSON.stringify({ jsonrpc: "2.0", id: 1, method, params })}\n`
+        )
       );
       socket.on("error", (error) =>
-        settle(() => fail(new HcError(method, sandboxHint(error.message, env), "unavailable")))
+        settle(() =>
+          fail(
+            new HcError(method, sandboxHint(error.message, env), "unavailable")
+          )
+        )
       );
-      socket.on("data", (chunk) => {
-        buffer += chunk.toString();
-        for (let at; (at = buffer.indexOf("\n")) >= 0; ) {
-          const line = buffer.slice(0, at);
-          buffer = buffer.slice(at + 1);
-          let message: { id?: unknown; result?: unknown; error?: unknown };
-          try {
-            message = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          if (message.id !== 1) continue;
-          if (message.error !== undefined) {
-            const error = asRecord(message.error, "error");
-            const data = error.data as Record<string, unknown> | undefined;
-            const kind = typeof data?.kind === "string" ? data.kind : undefined;
-            const detail = [error.message, data?.hint ?? data?.message]
-              .filter((part) => typeof part === "string" && part !== "")
-              .join(": ");
-            settle(() => fail(new HcError(method, detail || JSON.stringify(error), kind)));
-          } else {
-            settle(() => done(message.result));
-          }
-          return;
-        }
+      socket.on("close", () =>
+        settle(() =>
+          fail(
+            new HcError(
+              method,
+              "herdr-core closed the connection without answering",
+              "unavailable"
+            )
+          )
+        )
+      );
+      onJsonLines(socket, (message) => {
+        if (message.id !== 1) return;
+        if (message.error !== undefined)
+          settle(() => fail(rpcError(method, message.error)));
+        else settle(() => done(message.result));
       });
     });
 }
 
 export function parseTerminal(value: unknown): Terminal {
-  const record = asRecord(value, "hc terminal");
+  const record = asObject(value, "hc terminal");
   const address = record.address;
   if (typeof address !== "string" || address === "")
     throw new Error("hc terminal has no address");
-  const status =
-    typeof record.status === "object" && record.status !== null
-      ? (record.status as { state?: string })
-      : null;
-  const labels =
-    typeof record.labels === "object" && record.labels !== null
-      ? (record.labels as Record<string, string>)
-      : {};
   return {
     address,
     name: typeof record.name === "string" ? record.name : null,
     state: typeof record.state === "string" ? record.state : "live",
     turn: typeof record.turn === "number" ? record.turn : 0,
-    status,
-    labels,
-    exitCode: typeof record.exit_code === "number" ? record.exit_code : null,
+    status:
+      typeof record.status === "object" && record.status !== null
+        ? (record.status as { state?: string })
+        : null,
+    labels:
+      typeof record.labels === "object" && record.labels !== null
+        ? (record.labels as Record<string, string>)
+        : {},
+    pid: typeof record.pid === "number" ? record.pid : null,
+    reason: typeof record.reason === "string" ? record.reason : null,
   };
+}
+
+// The app keeps the terminals it shows, so a worker whose program dies is not
+// finished: it stays live with a `reason` until herdr-core swaps in a shell, which
+// then runs under a new pid.
+export function workerLost(terminal: Terminal): boolean {
+  if (terminal.state !== "live") return false;
+  if (terminal.reason !== null) return true;
+  const launched = terminal.labels[PID_LABEL];
+  return (
+    launched !== undefined &&
+    terminal.pid !== null &&
+    String(terminal.pid) !== launched
+  );
 }
 
 // A worker runs one task: its launch prompt. `turn` goes up each time the CLI's own
@@ -209,7 +250,7 @@ export function parseTerminal(value: unknown): Terminal {
 // working. A CLI that reports `idle` while still booting (Codex does) has turn 0.
 // Undefined means the worker is still on its task.
 export function settledStatus(terminal: Terminal): AppStatus | undefined {
-  if (terminal.state === "finished") return "exited";
+  if (terminal.state === "finished" || workerLost(terminal)) return "exited";
   const word = terminal.status?.state;
   if (word === "blocked") return "blocked";
   if (word === "error") return "error";
@@ -254,11 +295,9 @@ export function workerEnvironment(
 ): Record<string, string> {
   const out: Record<string, string> = {};
   if (env.PATH) out.PATH = env.PATH;
-  if (env.PSTACK_HERDR_ROUTES) out.PSTACK_HERDR_ROUTES = env.PSTACK_HERDR_ROUTES;
-  for (const [key, value] of Object.entries(worker.childEnv)) {
-    if (/[\r\n]/.test(value)) throw new Error(`environment ${key} contains a newline`);
-    out[key] = expandHome(value);
-  }
+  if (env.PSTACK_HERDR_ROUTES)
+    out.PSTACK_HERDR_ROUTES = env.PSTACK_HERDR_ROUTES;
+  for (const [key, value] of checkedEnv(worker.childEnv)) out[key] = value;
   return out;
 }
 
@@ -278,7 +317,37 @@ function whichBin(kind: AgentKind, env: NodeJS.ProcessEnv): string {
   return Bun.which(kind, { PATH: env.PATH ?? "" }) ?? kind;
 }
 
-async function getTerminal(rpc: HcRpc, caller: string, name: string): Promise<Terminal> {
+// The config-home variables of herdr-core's own environment, which every worker
+// inherits. Unreadable counts as unset.
+export async function coreConfigHomes(rpc: HcRpc): Promise<NodeJS.ProcessEnv> {
+  const keys = new Set<string>(
+    Object.values(CONFIG_HOMES).map((home) => home.key)
+  );
+  try {
+    const result = asObject(
+      await rpc("machine.exec", { argv: ["/usr/bin/env"], timeout: 10 }),
+      "hc machine.exec"
+    );
+    const text = Buffer.from(String(result.stdout ?? ""), "base64").toString(
+      "utf8"
+    );
+    const homes: NodeJS.ProcessEnv = {};
+    for (const line of text.split("\n")) {
+      const at = line.indexOf("=");
+      const key = line.slice(0, at);
+      if (at > 0 && keys.has(key)) homes[key] = line.slice(at + 1);
+    }
+    return homes;
+  } catch {
+    return {};
+  }
+}
+
+async function getTerminal(
+  rpc: HcRpc,
+  caller: string,
+  name: string
+): Promise<Terminal> {
   return parseTerminal(await rpc("terminal.get", { terminal: name, caller }));
 }
 
@@ -293,15 +362,23 @@ export function tidyScreen(text: string): string {
     .trim();
 }
 
-async function readOutput(rpc: HcRpc, caller: string, name: string): Promise<string> {
-  const result = asRecord(
+async function readOutput(
+  rpc: HcRpc,
+  caller: string,
+  name: string
+): Promise<string> {
+  const result = asObject(
     await rpc("terminal.read", { terminal: name, caller, lines: OUTPUT_LINES }),
     "hc terminal.read"
   );
   return typeof result.text === "string" ? tidyScreen(result.text) : "";
 }
 
-async function screen(rpc: HcRpc, caller: string, name: string): Promise<string> {
+async function screen(
+  rpc: HcRpc,
+  caller: string,
+  name: string
+): Promise<string> {
   try {
     return await readOutput(rpc, caller, name);
   } catch {
@@ -309,10 +386,32 @@ async function screen(rpc: HcRpc, caller: string, name: string): Promise<string>
   }
 }
 
-async function closeTerminal(rpc: HcRpc, caller: string, terminal: Terminal): Promise<void> {
-  if (terminal.state !== "finished")
-    await rpc("terminal.kill", { terminal: terminal.address, caller });
-  await rpc("terminal.rm", { terminal: terminal.address, caller });
+// Ends and removes a worker's terminal, and succeeds if it is already gone. A finished
+// one only needs removing; a program that ends on its own between the read and the
+// kill makes the kill fail, which is fine.
+export async function closeTerminal(
+  rpc: HcRpc,
+  caller: string,
+  address: string,
+  finished = false
+): Promise<void> {
+  const gone = (error: unknown, kinds: string[]) =>
+    error instanceof HcError &&
+    error.kind !== undefined &&
+    kinds.includes(error.kind);
+  if (!finished) {
+    try {
+      await rpc("terminal.kill", { terminal: address, caller });
+    } catch (error) {
+      if (!gone(error, ["finished", "not_found"])) throw error;
+    }
+  }
+  try {
+    await rpc("terminal.rm", { terminal: address, caller });
+  } catch (error) {
+    // Signal cleanup and the wait loop can both close the same worker.
+    if (!gone(error, ["not_found"])) throw error;
+  }
 }
 
 async function finish(
@@ -323,8 +422,16 @@ async function finish(
   keepPane: boolean
 ): Promise<AppSettlement> {
   const output = await readOutput(rpc, caller, terminal.address);
-  const closes = (status === "done" || status === "idle" || status === "exited") && !keepPane;
-  if (closes) await closeTerminal(rpc, caller, terminal);
+  const closes =
+    (status === "done" || status === "idle" || status === "exited") &&
+    !keepPane;
+  if (closes)
+    await closeTerminal(
+      rpc,
+      caller,
+      terminal.address,
+      terminal.state === "finished"
+    );
   return { status, blocked: status === "blocked", paneClosed: closes, output };
 }
 
@@ -354,7 +461,9 @@ async function awaitWorker(
           paneClosed: false,
           output: await screen(rpc, caller, address),
         };
-      await watcher.changed(Math.min(watcher.live ? WATCH_HEARTBEAT_MS : POLL_MS, left));
+      await watcher.changed(
+        Math.min(watcher.live ? WATCH_HEARTBEAT_MS : POLL_MS, left)
+      );
     }
   } finally {
     watcher.close();
@@ -362,107 +471,38 @@ async function awaitWorker(
 }
 
 // herdr-core pushes every fact change; status, turn, and exit changes on a watched
-// terminal are cues to read it again. Title changes (spinners) are ignored.
-export async function watchTerminals(
+// terminal are cues to read it again. Title changes (spinners) are not. One terminal
+// is filtered by herdr-core; several are filtered here.
+export function watchTerminals(
   terminals: string[],
   env: NodeJS.ProcessEnv
-): Promise<AppWatch> {
+): Promise<StatusWatch> {
   const watched = new Set(terminals);
-  let subscribed = false;
-  let closed = false;
-  let dirty = false;
-  let wake: (() => void) | undefined;
-  const signal = () => {
-    if (wake) wake();
-    else dirty = true;
-  };
-  let socket: Socket | undefined;
-  const path = socketPath(env);
-  if (path) {
-    const opened = connect(path);
-    socket = opened;
-    subscribed = await new Promise<boolean>((ready) => {
-      const timer = setTimeout(() => ready(false), SUBSCRIBE_TIMEOUT_MS);
-      const end = () => {
-        closed = true;
-        clearTimeout(timer);
-        ready(false);
-        signal();
-      };
-      opened.on("error", end);
-      opened.on("close", end);
-      opened.on("connect", () =>
-        opened.write(
-          `${JSON.stringify({ jsonrpc: "2.0", id: "pstack-herdr-watch", method: "events.subscribe", params: {} })}\n`
-        )
-      );
-      let buffer = "";
-      let started = false;
-      opened.on("data", (chunk) => {
-        buffer += chunk.toString();
-        for (let at; (at = buffer.indexOf("\n")) >= 0; ) {
-          const line = buffer.slice(0, at);
-          buffer = buffer.slice(at + 1);
-          let message: {
-            id?: unknown;
-            method?: unknown;
-            error?: unknown;
-            params?: { type?: unknown; terminal?: unknown };
-          };
-          try {
-            message = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          if (!started) {
-            if (message.id !== "pstack-herdr-watch") continue;
-            if (message.error !== undefined) {
-              opened.destroy();
-              continue;
-            }
-            started = true;
-            clearTimeout(timer);
-            ready(true);
-            continue;
-          }
-          const params = message.params;
-          if (message.method === "missed") signal();
-          else if (
-            message.method === "event" &&
-            typeof params?.terminal === "string" &&
-            watched.has(params.terminal) &&
-            WAKING_EVENTS.has(String(params.type))
-          )
-            signal();
-        }
-      });
-    });
-    if (!subscribed) socket.destroy();
-  }
-  dirty = false;
-  return {
-    get live() {
-      return subscribed && !closed;
+  return socketWatch(
+    socketPath(env),
+    {
+      jsonrpc: "2.0",
+      id: WATCH_ID,
+      method: "events.subscribe",
+      params: terminals.length === 1 ? { terminal: terminals[0] } : {},
     },
-    changed(ms) {
-      if (dirty) {
-        dirty = false;
-        return Promise.resolve();
+    (message, started) => {
+      if (!started) {
+        if (message.id !== WATCH_ID) return "skip";
+        return message.error === undefined ? "start" : "fail";
       }
-      return new Promise((done) => {
-        const timer = setTimeout(finishWait, Math.max(0, ms));
-        function finishWait() {
-          clearTimeout(timer);
-          wake = undefined;
-          done();
-        }
-        wake = finishWait;
-      });
-    },
-    close() {
-      socket?.destroy();
-    },
-  };
+      if (message.method === "missed") return "wake";
+      const params = message.params as
+        | { type?: unknown; terminal?: unknown }
+        | undefined;
+      return message.method === "event" &&
+        typeof params?.terminal === "string" &&
+        watched.has(params.terminal) &&
+        WAKING_EVENTS.has(String(params.type))
+        ? "wake"
+        : "skip";
+    }
+  );
 }
 
 function workerKind(terminal: Terminal, name: string): AgentKind {
@@ -482,7 +522,7 @@ export async function dispatchApp(
   onOwned: (name: string | undefined) => void = () => {}
 ): Promise<AppHandle | (AppHandle & AppSettlement)> {
   const { caller } = requireApp(env);
-  const worker = planWorker(options, env);
+  const worker = planWorker(options, env, await coreConfigHomes(rpc));
   let callerLabels: Record<string, string> = {};
   try {
     callerLabels = (await getTerminal(rpc, caller, caller)).labels;
@@ -501,6 +541,12 @@ export async function dispatchApp(
     })
   );
   onOwned(started.address);
+  if (started.pid !== null)
+    await rpc("terminal.label", {
+      terminal: started.address,
+      caller,
+      labels: { [PID_LABEL]: String(started.pid) },
+    });
   const handle: AppHandle = {
     agent: options.name,
     terminal: started.address,
@@ -524,14 +570,22 @@ export async function dispatchApp(
 }
 
 export async function collectApp(
-  options: { name: string; timeout?: number; keepPane: boolean; routes?: string },
+  options: {
+    name: string;
+    timeout?: number;
+    keepPane: boolean;
+    routes?: string;
+  },
   env: NodeJS.ProcessEnv = process.env,
   rpc: HcRpc = socketRpc(requireApp(env).socket, env),
   watch: AppWatcher = watchTerminals,
   onOwned: (name: string | undefined) => void = () => {}
 ): Promise<AppCollectResult> {
   const { caller } = requireApp(env);
-  const timeout = defaultTimeout(loadRoutes(options.routes, env), options.timeout);
+  const timeout = defaultTimeout(
+    loadRoutes(options.routes, env),
+    options.timeout
+  );
   const terminal = await getTerminal(rpc, caller, options.name);
   const kind = workerKind(terminal, options.name);
   onOwned(terminal.address);
@@ -539,7 +593,15 @@ export async function collectApp(
     agent: options.name,
     terminal: terminal.address,
     kind,
-    ...(await awaitWorker(rpc, caller, terminal.address, timeout, options.keepPane, env, watch)),
+    ...(await awaitWorker(
+      rpc,
+      caller,
+      terminal.address,
+      timeout,
+      options.keepPane,
+      env,
+      watch
+    )),
   };
 }
 
@@ -549,83 +611,57 @@ interface NextWorker {
   kind: AgentKind;
 }
 
-function failure(name: string, error: unknown): AppFailure {
-  return { agent: name, error: error instanceof Error ? error.message : String(error) };
-}
-
-// Waits for the first of several workers to settle, then collects every one that has.
-// It only watches, so a budget that ends or a stopped --next leaves every worker open.
 export async function nextApp(
-  options: { names: string[]; timeout?: number; keepPane: boolean; routes?: string },
+  options: {
+    names: string[];
+    timeout?: number;
+    keepPane: boolean;
+    routes?: string;
+  },
   env: NodeJS.ProcessEnv = process.env,
   rpc: HcRpc = socketRpc(requireApp(env).socket, env),
   watch: AppWatcher = watchTerminals
 ): Promise<AppNextResult> {
   const { caller } = requireApp(env);
-  const names = [...new Set(options.names.flatMap((name) => name.split(/\s+/)))].filter(Boolean);
-  if (names.length === 0) throw new Error("--next needs an agent name");
+  const names = nextNames(options.names);
   const deadline =
-    Date.now() + defaultTimeout(loadRoutes(options.routes, env), options.timeout);
-  const settled: AppNextResult["settled"] = [];
-  let pending: NextWorker[] = [];
-  for (const name of names) {
-    try {
+    Date.now() +
+    defaultTimeout(loadRoutes(options.routes, env), options.timeout);
+  return firstSettled<NextWorker, AppCollectResult>(names, deadline, {
+    async locate(name) {
       const terminal = await getTerminal(rpc, caller, name);
-      pending.push({ name, address: terminal.address, kind: workerKind(terminal, name) });
-    } catch (error) {
-      settled.push(failure(name, error));
-    }
-  }
-  const unsettled = () => pending.map((worker) => worker.name);
-  if (settled.length > 0) return { settled, pending: unsettled() };
-  const watcher = await watch(
-    pending.map((worker) => worker.address),
-    env
-  );
-  try {
-    for (;;) {
-      const running: NextWorker[] = [];
-      for (const worker of pending) {
-        try {
-          const terminal = await getTerminal(rpc, caller, worker.address);
-          const status = settledStatus(terminal);
-          if (!status) {
-            running.push(worker);
-            continue;
-          }
-          settled.push({
-            agent: worker.name,
-            terminal: worker.address,
-            kind: worker.kind,
-            ...(await finish(rpc, caller, terminal, status, options.keepPane)),
-          });
-        } catch (error) {
-          settled.push(failure(worker.name, error));
-        }
-      }
-      pending = running;
-      const left = deadline - Date.now();
-      if (settled.length > 0 || left <= 0) return { settled, pending: unsettled() };
-      await watcher.changed(Math.min(watcher.live ? WATCH_HEARTBEAT_MS : POLL_MS, left));
-    }
-  } finally {
-    watcher.close();
-  }
+      return {
+        name,
+        address: terminal.address,
+        kind: workerKind(terminal, name),
+      };
+    },
+    watch: (workers) =>
+      watch(
+        workers.map((worker) => worker.address),
+        env
+      ),
+    async probe(worker) {
+      const terminal = await getTerminal(rpc, caller, worker.address);
+      const status = settledStatus(terminal);
+      if (!status) return undefined;
+      return {
+        agent: worker.name,
+        terminal: worker.address,
+        kind: worker.kind,
+        ...(await finish(rpc, caller, terminal, status, options.keepPane)),
+      };
+    },
+    pause: (_pending, live) => (live ? WATCH_HEARTBEAT_MS : POLL_MS),
+  });
 }
 
-// An interrupted dispatch or collect ends its worker; nobody is left to read it.
-export function closeAppOnSignal(): (terminal: string | undefined) => void {
-  let owned: string | undefined;
-  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"] as const) {
-    process.on(signal, () => {
-      if (owned) {
-        Bun.spawnSync(["hc", "kill", owned]);
-        Bun.spawnSync(["hc", "rm", owned]);
-      }
-      process.exit(128 + constants.signals[signal]);
-    });
-  }
-  return (terminal) => {
-    owned = terminal;
-  };
+// An interrupted dispatch or collect ends its worker over the same socket the
+// dispatch used, so cleanup does not depend on the `hc` binary being on PATH.
+export function closeAppOnSignal(
+  env: NodeJS.ProcessEnv = process.env
+): (terminal: string | undefined) => void {
+  const { caller, socket } = requireApp(env);
+  const rpc = socketRpc(socket, env);
+  return closeOnSignal((terminal) => closeTerminal(rpc, caller, terminal));
 }

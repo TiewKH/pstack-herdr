@@ -21,8 +21,8 @@ In the Herdr app:
 
 - A worker is an `hc` terminal named `--name`, started with its brief as the CLI's launch prompt, so there is no readiness race and no retyping. Codex workers start with `--no-daemon`, as herdr-core requires.
 - `--placement tab` (the default) opens the worker as a background tab in the caller's space; `--placement split` puts it in the caller's tab. `--direction` is ignored; the app lays out splits. A caller with no space (an `hc` terminal outside the app) starts hidden workers; `hc attach <name>` shows one.
-- herdr-core starts programs with its own login environment, so the dispatcher passes the caller's `PATH` (and `PSTACK_HERDR_ROUTES`) with the profile's `env`.
-- Completion is the CLI's own status report: a worker is settled once its first turn ends (`done` or `idle` with a turn count above zero), `blocked`, `error`, or `exited` when its program ended. A Codex composer that reports `idle` while booting is not settled. Results carry `terminal` (the `hc` address) where the TUI carries `pane`; `paneClosed` means the worker's terminal was ended and removed.
+- herdr-core starts programs with its own login environment, so the dispatcher passes the caller's `PATH` (and `PSTACK_HERDR_ROUTES`) with the profile's `env`. A profile's default config home is dropped when herdr-core's environment leaves that variable unset, and passed when it names another account.
+- Completion is the CLI's own status report: a worker is settled once its first turn ends (`done` or `idle` with a turn count above zero), `blocked`, `error`, or `exited` when its program ended or was lost. A Codex composer that reports `idle` while booting is not settled. Results carry `terminal` (the `hc` address) where the TUI carries `pane`; `paneClosed` means the worker's terminal was ended and removed.
 - `unknown` means the budget ended before the worker started its task, for example when a dialog waits before its first turn. Open its tab, answer it, and `--collect` the worker.
 - To end an app worker by hand, run `hc kill <name>` and then `hc rm <name>`.
 
