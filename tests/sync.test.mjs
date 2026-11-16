@@ -17,6 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deriveSkill, loadLeadLines, loadModels } from "../tools/generate.mjs";
+import { HERDR } from "../tools/herdr.mjs";
 import { RUNTIMES } from "../tools/runtimes.mjs";
 import {
   applySubstitutions,
@@ -1653,14 +1654,15 @@ describe("sync CLI", () => {
     const newSha = commit(newText);
 
     const port = join(root, "port");
-    for (const file of ["sync.mjs", "generate.mjs", "plugin.mjs", "runtimes.mjs", "validate-skills.mjs", "substitutions.json"]) {
+    for (const file of ["sync.mjs", "generate.mjs", "plugin.mjs", "runtimes.mjs", "herdr.mjs", "validate-skills.mjs", "substitutions.json"]) {
       cpSync(join(import.meta.dir, "../tools", file), join(port, "tools", file));
     }
     symlinkSync(join(import.meta.dir, "../node_modules"), join(port, "node_modules"));
     cpSync(join(import.meta.dir, "../plugins/pstack/models.json"), join(port, "plugins/pstack/models.json"));
     mkdirSync(join(port, "plugins/pstack/skills"));
     writeFileSync(join(port, "plugins/pstack/skills/s.md"), localText);
-    for (const runtime of RUNTIMES) {
+    // pstack-herdr: the Herdr mapping is read for lead lines like a runtime's.
+    for (const runtime of [...RUNTIMES, HERDR]) {
       mkdirSync(join(port, runtime.tools, ".."), { recursive: true });
       writeFileSync(join(port, runtime.tools), `${runtime.notesHeader}\n|-------|----------|\n`);
     }
@@ -1761,7 +1763,7 @@ describe("sync CLI", () => {
     expect(result.stderr).not.toContain("tools/forks.json");
     const portOnly = [
       ...roleSkills.map((skill) => `${skill}/SKILL.md`),
-      ...RUNTIMES.map((runtime) => runtime.tools.replace("plugins/pstack/skills/", "")),
+      ...[...RUNTIMES, HERDR].map((runtime) => runtime.tools.replace("plugins/pstack/skills/", "")),
     ];
     expect(result.stdout).toContain(`\nport-only: ${portOnly.length} files\n`);
     for (const rel of portOnly) expect(result.stdout).toContain(`\n  plugins/pstack/skills/${rel}\n`);

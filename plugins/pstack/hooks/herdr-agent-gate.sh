@@ -5,6 +5,11 @@
 # HERDR_ENV=1; the Herdr app's terminals (herdr-core) carry HC_TERMINAL_ID.
 set -u
 
+# MiniMax Code loads this hooks file through its Claude Code reader, as
+# session-start.sh notes. The gate is for Claude Code's Agent tool, so it stays
+# out of MiniMax's way.
+if [ -n "${MINIMAX_PLUGIN_ROOT:-}" ]; then exit 0; fi
+
 if [ "${HERDR_ENV:-}" = "1" ]; then
   runtime="HERDR_ENV=1"
 elif [ -n "${HC_TERMINAL_ID:-}" ]; then

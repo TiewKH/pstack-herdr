@@ -54,6 +54,7 @@ import { Type } from "typebox";
 import { Value } from "typebox/value";
 
 import { code, codeList, isMain, PLUGIN, SKILLS } from "./plugin.mjs";
+import { HERDR } from "./herdr.mjs";
 import { PLATFORM_ADAPTATION_OPEN, platformAdaptation, RUNTIMES, roleSkills } from "./runtimes.mjs";
 import { markdownFiles, pathIsInside, validateProsePaths, validateSkillsTree, walk } from "./validate-skills.mjs";
 
@@ -438,7 +439,8 @@ export function regions(models) {
 const PREAMBLE_RUNTIMES = RUNTIMES.filter((runtime) => runtime.preamble);
 const DRIVER_LINE = "Resolve the driver skill through [poteto-mode's Non-negotiables](../SKILL.md#non-negotiables).";
 const DRIVER_PLAYBOOKS = ["autopilot-full", "multi-phase-plan", "orchestrate", "refactoring", "shipping"];
-const LEAD_LINES = [...PREAMBLE_RUNTIMES.map((runtime) => runtime.preamble), DRIVER_LINE];
+// pstack-herdr: the Herdr lead follows the runtime preambles (tools/herdr.mjs).
+const LEAD_LINES = [...PREAMBLE_RUNTIMES.map((runtime) => runtime.preamble), HERDR.preamble, DRIVER_LINE];
 
 // The skills with a row in a runtime mapping's Per-skill notes table, in row order.
 export function noteSkills(runtime, markdown) {
@@ -465,6 +467,12 @@ export function loadLeadLines(root = repo) {
       if (!existsSync(join(root, file))) throw new Error(`${runtime.tools}: per-skill note for "${skill}", which has no SKILL.md`);
       if (runtime.preamble) leads.set(file, [...(leads.get(file) ?? []), runtime.preamble]);
     }
+  }
+  // pstack-herdr: every skill herdr-tools.md's Per-skill notes table names gets the Herdr lead last.
+  for (const skill of noteSkills(HERDR, readFileSync(join(root, HERDR.tools), "utf8"))) {
+    const file = `${SKILLS}/${skill}/SKILL.md`;
+    if (!existsSync(join(root, file))) throw new Error(`${HERDR.tools}: per-skill note for "${skill}", which has no SKILL.md`);
+    leads.set(file, [...(leads.get(file) ?? []), HERDR.preamble]);
   }
   for (const playbook of DRIVER_PLAYBOOKS) leads.set(`${SKILLS}/poteto-mode/playbooks/${playbook}.md`, [DRIVER_LINE]);
   return leads;
@@ -1027,7 +1035,7 @@ export function problems(root, models) {
     if (strays.length) {
       throw new Error(
         "generator-owned lead lines outside their files (a runtime preamble needs a row in the Per-skill notes " +
-          `table of ${PREAMBLE_RUNTIMES.map((r) => r.tools).join(" or ")}; the driver-skill line belongs to DRIVER_PLAYBOOKS):\n` +
+          `table of ${[...PREAMBLE_RUNTIMES, HERDR].map((r) => r.tools).join(" or ")}; the driver-skill line belongs to DRIVER_PLAYBOOKS):\n` +
           strays.join("\n"),
       );
     }

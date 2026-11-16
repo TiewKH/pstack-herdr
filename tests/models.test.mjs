@@ -50,6 +50,13 @@ describe("committed models.json", () => {
     for (const [, id] of raw.herdr.codex) expect(id).toMatch(/^gpt-\d/);
   });
 
+  // Upstream bumps a model in the Pi and Codex tables; the Herdr menus must offer it too.
+  test("Herdr worker menus offer every model the Pi tables map to", () => {
+    const offered = new Set([...raw.herdr.claude, ...raw.herdr.codex].map(([, id]) => id));
+    const mapped = Object.values(raw.pi.models).flatMap((table) => Object.values(table).map((id) => id.split("/")[1]));
+    for (const id of mapped) expect(offered.has(id), `${id} is in the Pi tables but not the Herdr menu`).toBe(true);
+  });
+
   test("setup-pstack lists the Herdr worker IDs by label and ID", () => {
     const text = readFileSync(join(skillsDir, "setup-pstack/SKILL.md"), "utf8");
     expect(text).toContain("- Herdr Claude worker IDs: Opus 5.5 (`claude-opus-5-5`), ");

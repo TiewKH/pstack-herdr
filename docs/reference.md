@@ -74,7 +74,7 @@ All runtimes share [one skills tree](../plugins/pstack/skills/). A skills-only i
 | OpenCode 2 | Add the checkout's `plugins/pstack/opencode` directory to OpenCode's `plugins` array, or install the repository as a Git package with `opencode plugin add`. The native plugin registers bundled skills under `pstack-` IDs and injects routing in root sessions. Explicit activation and routing were tested on 2.2.5 with a synthetic loopback provider; CLI delegation was previously verified on 2.0.30. Real model behavior for this plugin remains untested. See the [OpenCode mapping](../plugins/pstack/skills/poteto-mode/references/opencode-tools.md). |
 | Gemini CLI | Its documentation describes shared-directory discovery; it has not been tested in a live session. Use `/skills list` to check discovery and `/skills reload` after changes. |
 
-Inside Herdr, Claude Code and Codex coordinators delegate through the Herdr dispatcher instead; see [HERDR.md](../HERDR.md).
+Inside Herdr, coordinators delegate through the Herdr dispatcher instead. That is verified from Claude Code and Codex coordinators only; see [HERDR.md](../HERDR.md).
 
 These checks cover skill discovery. Delegation remains unverified on Prime Agent and Gemini CLI, as do their multi-model workflows. On those runtimes, agents must adapt Claude-specific tools, models, and configuration. Each mapping applies only to its runtime.
 

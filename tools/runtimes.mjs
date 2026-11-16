@@ -3,6 +3,7 @@
 // check, versioned manifest, packaging validator, and hooks files.
 
 import { isDeepStrictEqual } from "node:util";
+import { HERDR_PLATFORM_SENTENCE } from "./herdr.mjs";
 import { code, codeList, PLUGIN, SKILLS } from "./plugin.mjs";
 
 // Every runtime other than Claude Code that reads the skills through a mapping
@@ -140,8 +141,8 @@ export function platformAdaptation() {
       "the `Agent` tool accepts, as each Models section lists them. On Claude Code they work as written.",
     `${pointer(first)} for the ${first.name} equivalent of a Claude tool, model, or skill named by these workflows.`,
     ...rest.map((runtime) => `${pointer(runtime)} instead.`),
-    // pstack-herdr: inside Herdr, delegation goes through the dispatcher on any of these runtimes.
-    "When `HERDR_ENV=1` or `HC_TERMINAL_ID` is set, read [`references/herdr-tools.md`](references/herdr-tools.md) before the first delegation.",
+    // pstack-herdr: inside Herdr, delegation goes through the dispatcher.
+    HERDR_PLATFORM_SENTENCE,
     "Other runtimes can discover the same Agent Skills tree, but they must use their own tool, model, and " +
       "configuration equivalents. No one of these mappings is a cross-runtime map.",
   ].join(" ");

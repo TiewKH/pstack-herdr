@@ -73,7 +73,7 @@ Collect all nine required semantic roles:
 
 Each role has a non-empty `profiles` array and `strategy` of `first` or `spread`.
 
-Prefer capable/cheap profiles for `explorer` and `verifier`, stronger profiles for `difficult-implementation`, `judgment`, `arena-judge`, and `subcoordinator`, and diverse pools for `reviewer` and `arena-candidate` when more than one runtime/model is available.
+Prefer capable/cheap profiles for `explorer` and `verifier`, stronger profiles for `difficult-implementation`, `judgment`, `arena-judge`, and `subcoordinator`, and diverse pools for `reviewer` and `arena-candidate` when more than one runtime/model is available. Orchestrate verifies each PR on a different model family from its author, so when both CLIs are available, give `verifier` at least one Claude and one Codex profile.
 
 A worker that delegates reaches Herdr over a local socket, and Codex's `workspace-write` sandbox blocks that socket while its network is off. A Codex profile routed to `subcoordinator` therefore needs `network_access = true` under `[sandbox_workspace_write]` in that profile's `$CODEX_HOME/config.toml`. The setting loosens every session that uses that Codex home, not only subcoordinators. When the user routes `subcoordinator` to a Codex profile, say so and ask whether that home has the setting. Do not edit Codex's config yourself. Offer a Claude profile for the role as the alternative. Claude Code does not sandbox its shell by default.
 
@@ -261,5 +261,5 @@ Stamped from `plugins/pstack/models.json` (edit there, rerun `tools/generate.mjs
 - Reasoning effort levels: `low`, `medium`, `high`, `xhigh`, `max`
 - Default reasoning effort: `session`
 - Single-role default: `opus`
-- Herdr Claude worker IDs: Opus 5.5 (`claude-opus-5-5`), Opus 5 (`claude-opus-5`), Opus 4.8 (`claude-opus-4-8`), Opus 4.6 (`claude-opus-4-6`), Fable 5.1 (`claude-fable-5-1`), Fable 5 (`claude-fable-5`), Sonnet 5.5 (`claude-sonnet-5-5`), Sonnet 5 (`claude-sonnet-5`), Sonnet 4.6 (`claude-sonnet-4-6`), Haiku 4.5 (`claude-haiku-4-5`)
+- Herdr Claude worker IDs: Opus 5.5 (`claude-opus-5-5`), Opus 5 (`claude-opus-5`), Opus 4.8 (`claude-opus-4-8`), Opus 4.6 (`claude-opus-4-6`), Fable 5.2 (`claude-fable-5-2`), Fable 5.1 (`claude-fable-5-1`), Fable 5 (`claude-fable-5`), Sonnet 5.5 (`claude-sonnet-5-5`), Sonnet 5 (`claude-sonnet-5`), Sonnet 4.6 (`claude-sonnet-4-6`), Haiku 5.5 (`claude-haiku-5-5`), Haiku 4.5 (`claude-haiku-4-5`)
 - Herdr Codex worker IDs: GPT-6.1-Sol (`gpt-6.1-sol`), GPT-6.1-Terra (`gpt-6.1-terra`), GPT-6-Sol (`gpt-6-sol`), GPT-6-Astra (`gpt-6-astra`), GPT-6-Luna (`gpt-6-luna`), GPT-5.6-Sol (`gpt-5.6-sol`), GPT-5.6-Terra (`gpt-5.6-terra`), GPT-5.6-Luna (`gpt-5.6-luna`), GPT-5.5 (`gpt-5.5`)

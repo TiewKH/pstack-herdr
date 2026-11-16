@@ -54,16 +54,10 @@ if (!mapping.includes("herdr-agent-gate.sh") || !mapping.includes("PSTACK_HERDR_
   throw new Error("Herdr mapping does not document the Agent gate and its bypass");
 }
 if (!mapping.includes("herdr/dispatch.ts")) throw new Error("Herdr mapping does not point to dispatcher");
-// Upstream's focused-fix exception lets one delegate investigate and implement; the
-// mapping must say which Herdr role that worker takes.
-const bugFix = read("plugins/pstack/skills/poteto-mode/playbooks/bug-fix.md");
-if (bugFix.includes("focused-fix exception") && !mapping.includes("focused-fix delegate")) {
-  throw new Error("Herdr mapping does not route Bug fix's focused-fix delegate");
-}
 if (!mapping.includes("`HERDR_ENV=1` or `HC_TERMINAL_ID` is set") || !mapping.includes("## Runtimes")) {
   throw new Error("Herdr mapping does not cover both the Herdr TUI and the Herdr app");
 }
-if (!mapping.includes("| `how` |") || !mapping.includes("| Feature / bug-fix")) {
+if (!mapping.includes("| `how` |") || !mapping.includes("| [feature](../playbooks/feature.md), [bug-fix](../playbooks/bug-fix.md)")) {
   throw new Error("Herdr mapping is missing per-skill notes");
 }
 for (const skill of ["automate-me", "maintain-verification-skill", "show-me-your-work", "recall", "no-comments", "thermos"]) {
@@ -118,6 +112,44 @@ for (const entry of skillDirs) {
     throw new Error(`${entry} no longer needs its noHerdrPointer entry`);
   }
 }
+// Every role line the model sheet can hold names a delegate kind. A new line from
+// upstream fails here until herdr-tools.md's Sheet lines table gives it a Herdr role.
+const models = JSON.parse(read("plugins/pstack/models.json"));
+for (const { role } of models.roles) {
+  if (!mapping.includes("| `" + role + "` |")) {
+    throw new Error(`herdr-tools.md Sheet lines table has no row for the sheet line \`${role}\``);
+  }
+}
+
+// A playbook that mentions delegation either has a row in herdr-tools.md's Playbook
+// notes table or says here why it needs none, the same rule the skills follow.
+const noHerdrPlaybookRow = {
+  "opening-a-pr": "says what a subagent that opens a PR runs; starts none",
+};
+const playbookDir = join(root, "plugins/pstack/skills/poteto-mode/playbooks");
+const playbookStems = readdirSync(playbookDir).filter((f) => f.endsWith(".md")).map((f) => f.slice(0, -3));
+const playbookRows = mapping.slice(mapping.indexOf("| Playbook | On Herdr |"));
+const rowStems = new Set(
+  [...playbookRows.matchAll(/^\| ([^|]+) \|/gm)].flatMap((m) =>
+    [...m[1].matchAll(/\[([a-z0-9-]+)\]\(\.\.\/playbooks\/\1\.md\)/g)].map((s) => s[1])
+  )
+);
+for (const stem of rowStems) {
+  if (!playbookStems.includes(stem)) throw new Error(`herdr-tools.md Playbook notes names ${stem}, which is not a playbook`);
+}
+for (const entry of Object.keys(noHerdrPlaybookRow)) {
+  if (!playbookStems.includes(entry)) throw new Error(`noHerdrPlaybookRow names ${entry}, which is not a playbook`);
+}
+for (const stem of playbookStems) {
+  const delegates = delegation.test(read(`plugins/pstack/skills/poteto-mode/playbooks/${stem}.md`));
+  if (delegates && !rowStems.has(stem) && !(stem in noHerdrPlaybookRow)) {
+    throw new Error(`playbook ${stem} mentions delegation but has no herdr-tools.md Playbook notes row or noHerdrPlaybookRow reason`);
+  }
+  if (stem in noHerdrPlaybookRow && (rowStems.has(stem) || !delegates)) {
+    throw new Error(`playbook ${stem} no longer needs its noHerdrPlaybookRow entry`);
+  }
+}
+
 for (const playbook of playbooks) {
   const body = read(`plugins/pstack/skills/poteto-mode/playbooks/${playbook}.md`);
   if (

@@ -135,3 +135,9 @@ test('a Herdr TUI pane inside a Herdr app terminal still needs the herdr binary'
   assert.equal(out.hookSpecificOutput, undefined);
   assert.match(out.systemMessage, /herdr.*not on PATH/i);
 });
+
+test('MiniMax Code, which loads this hooks file through its Claude Code reader, is never gated', () => {
+  const fx = fixture({ herdr: true, bun: true });
+  assert.equal(run({ HERDR_ENV: '1', MINIMAX_PLUGIN_ROOT: fx.plugin }, fx), null);
+  assert.equal(run({ HC_TERMINAL_ID: 't7', HC_TERMINAL_SOCKET: '/tmp/hc.sock', MINIMAX_PLUGIN_ROOT: fx.plugin }, fx), null);
+});
