@@ -54,6 +54,12 @@ if (!mapping.includes("herdr-agent-gate.sh") || !mapping.includes("PSTACK_HERDR_
   throw new Error("Herdr mapping does not document the Agent gate and its bypass");
 }
 if (!mapping.includes("herdr/dispatch.ts")) throw new Error("Herdr mapping does not point to dispatcher");
+// Upstream's focused-fix exception lets one delegate investigate and implement; the
+// mapping must say which Herdr role that worker takes.
+const bugFix = read("plugins/pstack/skills/poteto-mode/playbooks/bug-fix.md");
+if (bugFix.includes("focused-fix exception") && !mapping.includes("focused-fix delegate")) {
+  throw new Error("Herdr mapping does not route Bug fix's focused-fix delegate");
+}
 if (!mapping.includes("`HERDR_ENV=1` or `HC_TERMINAL_ID` is set") || !mapping.includes("## Runtimes")) {
   throw new Error("Herdr mapping does not cover both the Herdr TUI and the Herdr app");
 }
