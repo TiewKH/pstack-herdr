@@ -9,6 +9,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { plainText } from "../backends/plain-text.ts";
 import { readMessages } from "../frontends/messages.ts";
+import { childEnv } from "../run.ts";
+import { drawn } from "./drawn.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const corpus = path.join(here, "corpus");
@@ -48,7 +50,7 @@ function run(
     {
       encoding: "utf8",
       env: {
-        ...process.env,
+        ...childEnv(),
         JAVA: java,
         TLA2TOOLS: "tla2tools.jar",
         STATECHART_REPLAY: dir,
@@ -238,7 +240,7 @@ function startCommand(
     ],
     {
       env: {
-        ...process.env,
+        ...childEnv(),
         JAVA: java,
         TLA2TOOLS: "tla2tools.jar",
         STATECHART_REPLAY: dir,
@@ -454,7 +456,15 @@ for (const signal of ["SIGINT", "SIGTERM"] satisfies NodeJS.Signals[]) {
       signalWhile(signal, () => ({
         dir: gridCase(150),
         reached: (parent) => {
-          for (const f of fs.readdirSync(parent, { recursive: true, encoding: "utf8" }))
+          let entries: string[];
+          try {
+            entries = fs.readdirSync(parent, { recursive: true, encoding: "utf8" });
+          } catch (error) {
+            // The worker renames draft to done when it finishes, which can land mid-walk.
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+            throw error;
+          }
+          for (const f of entries)
             if (
               path.basename(f) === "chart.mmd" &&
               fs.statSync(path.join(parent, f), { throwIfNoEntry: false })?.size
@@ -881,18 +891,6 @@ test("a view with a group in a theme color draws that color and names the group 
   assert.match(chart, new RegExp(`^ {2}class ${legend} teal$`, "m"));
 });
 
-const shown = (text: string) => text.replace(/#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)));
-
-const drawn = (chart: string) => {
-  const names = new Map<string, string>();
-  for (const m of chart.matchAll(/^ *(?:state "(.*)" as (s\d+) \{|(s\d+): (.*))$/gm))
-    names.set(m[2] ?? m[3], shown(m[1] ?? m[4]));
-  const arrows: string[] = [];
-  for (const [, from, to, text] of chart.matchAll(/^ *(s\d+) --> (s\d+): (.*)$/gm))
-    arrows.push(`${names.get(from)} --> ${names.get(to)}: ${shown(text)}`);
-  return { states: [...names.values()], arrows };
-};
-
 const byX = (labels: unknown[]) => `export const state = (v) => ${JSON.stringify(labels)}[v.x];\n`;
 
 const fanOut = (n: number) => {
@@ -926,7 +924,7 @@ for (const [what, c] of [
       view: byX([["a\0b"], ["a", "b"], ["c"], ["d"]]),
       status: 0,
       states: ["ab", "a", "b", "c", "d"],
-      arrows: ["ab --> b: Inc", "b --> c: Inc", "c --> d: Inc"],
+      arrows: ["a start --> b", "ab --> a: Inc", "b --> c: Inc", "c --> d: Inc"],
       says: /^TLC reached 4 states and 3 steps\. The chart draws 4 states and 3 arrows\.$/m,
     },
   ],
@@ -942,7 +940,14 @@ for (const [what, c] of [
       ]),
       status: 0,
       states: ["R f", "S p", "R ab", "S q", "R a", "R b", "S r"],
-      arrows: ["S p --> S q: Inc", "S p --> S r: Inc"],
+      arrows: [
+        "R f start --> S p",
+        "R ab start --> S q",
+        "R b start --> S r",
+        "R a start --> R b",
+        "S p --> R ab: Inc",
+        "S p --> R a: Inc",
+      ],
       says: /^The regions chart lets R f, S p go to R a\0b, S r by Inc, which the model never does\. So the chart draws parent states in place of regions\.$/m,
     },
   ],
@@ -964,7 +969,7 @@ for (const [what, c] of [
       view: byX([["a\u0001b"], ["a", "b"], ["c"], ["d"]]),
       status: 0,
       states: ["a\u0001b", "a", "b", "c", "d"],
-      arrows: ["a\u0001b --> b: Inc", "b --> c: Inc", "c --> d: Inc"],
+      arrows: ["a start --> b", "a\u0001b --> a: Inc", "b --> c: Inc", "c --> d: Inc"],
       says: /^TLC reached 4 states and 3 steps\. The chart draws 4 states and 3 arrows\.$/m,
     },
   ],
@@ -1002,7 +1007,7 @@ for (const [what, c] of [
       view: byX([["a"], ["P", "b\u0002c"], ["d"], ["e"]]),
       status: 1,
       states: ["a", "P", "b\u0002c", "d", "e"],
-      arrows: ["a --> b\u0002c: Next", "b\u0002c --> d: Next", "d --> e: Next"],
+      arrows: ["P start --> b\u0002c", "a --> P: Next", "b\u0002c --> d: Next", "d --> e: Next"],
       says: /^## NotOne breaks\nThe shortest path has 1 step:\n0\. a\n1\. Next: P \/ b\cBc$/m,
     },
   ],
@@ -1039,10 +1044,15 @@ for (const [what, c] of [
       status: 0,
       states: ["R f", "S p", "R a", "S r", "R b", "S q", "R X\u0003a", "S q", "R X\u0003b", "S r"],
       arrows: [
-        "S p --> S r: Go\u0003X",
-        "S p --> S q: Go\u0003X",
-        "S p --> S q: Go",
-        "S p --> S r: Go",
+        "R f start --> S p",
+        "R a start --> S r",
+        "R b start --> S q",
+        "R X\u0003a start --> S q",
+        "R X\u0003b start --> S r",
+        "S p --> R a: Go\u0003X",
+        "S p --> R b: Go\u0003X",
+        "S p --> R X\u0003a: Go",
+        "S p --> R X\u0003b: Go",
       ],
       says: /^The regions chart lets R f, S p go to R a, S q by Go\cCX, which the model never does\. So the chart draws parent states in place of regions\.$/m,
     },

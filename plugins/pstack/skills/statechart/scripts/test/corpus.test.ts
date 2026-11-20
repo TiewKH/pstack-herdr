@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { check, PINNED_FLAGS } from "../run.ts";
+import { check, childEnv, PINNED_FLAGS } from "../run.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const corpus = path.join(here, "corpus");
@@ -32,7 +32,8 @@ for (const name of fs.readdirSync(corpus)) {
       {
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...childEnv(),
+          TLA2TOOLS: process.env.TLA2TOOLS,
           JAVA: path.join(here, "java.ts"),
           STATECHART_JAVA: process.env.JAVA ?? "java",
           STATECHART_RECORD: tlc,
@@ -70,7 +71,17 @@ test("a spec in a folder whose name is not ASCII checks under the POSIX locale",
       "--out",
       out,
     ],
-    { encoding: "utf8", env: { ...process.env, LC_ALL: "POSIX", LC_CTYPE: "", LANG: "" } },
+    {
+      encoding: "utf8",
+      env: {
+        ...childEnv(),
+        TLA2TOOLS: process.env.TLA2TOOLS,
+        JAVA: process.env.JAVA,
+        LC_ALL: "POSIX",
+        LC_CTYPE: "",
+        LANG: "",
+      },
+    },
   );
   assert.equal(r.stderr, "");
   assert.equal(r.status, 0);
@@ -368,7 +379,8 @@ for (const [width, height, config, status, drawn, chart, header] of [
         {
           encoding: "utf8",
           env: {
-            ...process.env,
+            ...childEnv(),
+            TLA2TOOLS: process.env.TLA2TOOLS,
             JAVA: path.join(here, "java.ts"),
             STATECHART_JAVA: process.env.JAVA ?? "java",
             STATECHART_RECORD: tlc,
@@ -380,6 +392,44 @@ for (const [width, height, config, status, drawn, chart, header] of [
       assert.equal(fs.existsSync(path.join(tlc, "ChartRun.out")), drawn);
       assert.equal(fs.existsSync(path.join(out, "chart.mmd")), chart);
       assert.equal(read(path.join(out, "report.md")).split("\n")[2], header);
+    },
+  );
+
+for (const [what, tla, where] of [
+  [
+    "an unknown name",
+    ["---- MODULE Broken ----", "VARIABLE x", "Init == x = 0", "Next == x' = y", "===="],
+    /^line 4, col 14 to line 4, col 14 of module Broken\n+Unknown operator: `y'\.$/m,
+  ],
+  [
+    "a parse error",
+    ["---- MODULE Broken ----", "VARIABLE x", "Init == x = = 0", "Next == x' = x", "===="],
+    /^Encountered "0" at line 3, column 15/m,
+  ],
+  [
+    "twelve unknown names",
+    [
+      "---- MODULE Broken ----",
+      "VARIABLE x",
+      "Init == x = 0",
+      ...Array.from({ length: 12 }, (_, i) => `D${i} == u${i}`),
+      "Next == x' = x",
+      "====",
+    ],
+    /^\*\*\* Errors: 12\n+line 4, col 7 to line 4, col 8 of module Broken\n+Unknown operator: `u0'\.$/m,
+  ],
+] as const)
+  test(
+    `a spec with ${what} gets SANY's line and column, not a Java stack trace`,
+    { skip },
+    async () => {
+      const base = writeSpec("Broken", [...tla], "INIT Init\nNEXT Next\n");
+      await assert.rejects(check(`${base}.tla`, `${base}.cfg`), (error: Error) => {
+        assert.match(error.message, /^SANY could not read .*Broken\.tla \(exit 1\):\n/);
+        assert.match(error.message, where);
+        assert.doesNotMatch(error.message, /^\s+at tla2sany\./m);
+        return true;
+      });
     },
   );
 

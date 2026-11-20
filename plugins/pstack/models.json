@@ -15,34 +15,29 @@
     { "role": "hillclimb", "models": "default", "skill": "poteto-mode" },
     { "role": "judgment and prose", "models": "default", "skill": "poteto-mode" },
     { "role": "strongest judgment", "models": "strongest", "skill": "poteto-mode" },
-    { "role": "how explorer", "models": "default", "skill": "how" },
-    { "role": "how explainer", "models": "default", "skill": "how" },
-    { "role": "why investigators", "models": "default", "skill": "why" },
-    { "role": "why synthesizer", "models": "default", "skill": "why" },
-    { "role": "reflect tooling", "models": "default", "skill": "reflect" },
-    { "role": "reflect judgment, divergent, synthesizer", "models": "default", "skill": "reflect" },
     { "role": "arena runners", "models": "panel", "skill": "arena" },
     { "role": "arena cross-judge pool", "models": "panel", "skill": "arena" },
     { "role": "swarm workers", "models": "default", "skill": "swarm" },
-    { "role": "architect runners", "models": "panel", "skill": "architect" },
-    { "role": "interrogate reviewers", "models": "panel", "skill": "interrogate" }
+    { "role": "interrogate reviewers", "models": "panel", "skill": "interrogate" },
+    { "role": "thermos reviewers", "models": "default", "skill": "thermos" },
+    { "role": "no-comments reviewer", "models": "default", "skill": "no-comments" }
   ],
   "codex": {
-    "default": "gpt-6.1-sol",
-    "strongest": "gpt-6-astra",
-    "worker": "gpt-6.1-sol",
-    "panel": ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"]
+    "default": "gpt-6.2-sol",
+    "strongest": "gpt-6.2-astra",
+    "worker": "gpt-6.2-sol",
+    "panel": ["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna"]
   },
   "herdr": {
-    "claude": [["Opus 5.5", "claude-opus-5-5"], ["Opus 5", "claude-opus-5"], ["Opus 4.8", "claude-opus-4-8"], ["Opus 4.6", "claude-opus-4-6"], ["Fable 5.1", "claude-fable-5-1"], ["Fable 5", "claude-fable-5"], ["Sonnet 5.5", "claude-sonnet-5-5"], ["Sonnet 5", "claude-sonnet-5"], ["Sonnet 4.6", "claude-sonnet-4-6"], ["Haiku 4.5", "claude-haiku-4-5"]],
-    "codex": [["GPT-6.1-Sol", "gpt-6.1-sol"], ["GPT-6.1-Terra", "gpt-6.1-terra"], ["GPT-6-Sol", "gpt-6-sol"], ["GPT-6-Astra", "gpt-6-astra"], ["GPT-6-Luna", "gpt-6-luna"], ["GPT-5.6-Sol", "gpt-5.6-sol"], ["GPT-5.6-Terra", "gpt-5.6-terra"], ["GPT-5.6-Luna", "gpt-5.6-luna"], ["GPT-5.5", "gpt-5.5"]]
+    "claude": [["Opus 5.5", "claude-opus-5-5"], ["Opus 5", "claude-opus-5"], ["Opus 4.8", "claude-opus-4-8"], ["Opus 4.6", "claude-opus-4-6"], ["Fable 5.2", "claude-fable-5-2"], ["Fable 5.1", "claude-fable-5-1"], ["Fable 5", "claude-fable-5"], ["Sonnet 5.5", "claude-sonnet-5-5"], ["Sonnet 5", "claude-sonnet-5"], ["Sonnet 4.6", "claude-sonnet-4-6"], ["Haiku 4.5", "claude-haiku-4-5"]],
+    "codex": [["GPT-6.2-Sol", "gpt-6.2-sol"], ["GPT-6.2-Astra", "gpt-6.2-astra"], ["GPT-6.1-Sol", "gpt-6.1-sol"], ["GPT-6.1-Terra", "gpt-6.1-terra"], ["GPT-6-Sol", "gpt-6-sol"], ["GPT-6-Astra", "gpt-6-astra"], ["GPT-6-Luna", "gpt-6-luna"], ["GPT-5.6-Sol", "gpt-5.6-sol"], ["GPT-5.6-Terra", "gpt-5.6-terra"], ["GPT-5.6-Luna", "gpt-5.6-luna"], ["GPT-5.5", "gpt-5.5"]]
   },
   "pi": {
     "fallback": "anthropic",
     "models": {
       "anthropic": {
         "opus": "anthropic/claude-opus-5-5",
-        "fable": "anthropic/claude-fable-5-1",
+        "fable": "anthropic/claude-fable-5-2",
         "sonnet": "anthropic/claude-sonnet-5-5",
         "haiku": "anthropic/claude-haiku-5-5"
       },

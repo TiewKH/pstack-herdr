@@ -6,7 +6,7 @@ Thanks for helping out. This repo is a **port**, not an original work: the `skil
 
 ## The sync boundary
 
-Upstream owns skill content. This port owns the Cursor-to-Claude-Code translation. It also carries named forks, each declared in [`tools/forks.json`](tools/forks.json) as a `port-feature` (Claude Code, Codex, Pi, GitHub Copilot, or Muse mechanics upstream cannot carry) or a `policy` (a workflow change the port chose to keep).
+Upstream owns skill content. This port owns the Cursor-to-Claude-Code translation. It also carries named forks, each declared in [`tools/forks.json`](tools/forks.json) as a `port-feature` (Claude Code, Codex, Pi, GitHub Copilot, Muse, or MiniMax Code mechanics upstream cannot carry) or a `policy` (a workflow change the port chose to keep).
 
 Both kinds of `SKILL.md` change land here. Upstream rarely merges pull requests from outside its own team, so this port does not ask you to land a change there first. Before changing a `SKILL.md`, work out which kind yours is:
 
@@ -14,6 +14,8 @@ Both kinds of `SKILL.md` change land here. Upstream rarely merges pull requests 
 - **Changing what a skill does.** New steps, a different workflow, reworded guidance. Open a PR here too. The port keeps the change as a `policy` fork, and every later sync merges it three ways against upstream's new text. Keep the edit small and in one place, because a wide rewrite conflicts each time upstream touches the same lines, and someone has to settle the change again under time pressure.
 
 Declare each file your change forks in `tools/forks.json` in the same PR, so the next sync knows it is deliberate and not drift. Set the entry's `upstream` field to `not-proposed`, or to the URL of an upstream PR or issue if you opened one.
+
+Put new port behavior in a file of its own where you can, rather than in a file upstream owns. A port-only file never conflicts in a sync. `watch-pr/shipping.ts` and `watch-pr/landing.ts` are port-only, while the edits inside `watch-pr/policy.ts` and `watch-pr/github.ts` are forks that every sync touching those files has to settle again. The `watch-pr` forks already hold most of the port's forked lines, as `bun tools/sync.mjs pstack <pinned sha> --dry-run` prints.
 
 Each substitution rule in [`tools/substitutions.json`](tools/substitutions.json) has a `rationale` field that gives its reason. If you add a rule, fill in its `rationale` in the same PR.
 
@@ -33,17 +35,20 @@ When a clean merge matches the new upstream text and mode, the sync reports it a
 
 ## Before you open a PR
 
-Install the root dependencies, then run the generator and the tests:
+Install the root dependencies and the copy of Pi the tests load, then run the generator and the tests:
 
 ```shell
 bun install --frozen-lockfile
+bun install --frozen-lockfile --cwd plugins
 bun tools/generate.mjs
 bun test tests/
 ```
 
-The root `package.json` declares `typebox` and the optional `@earendil-works/pi-coding-agent` as peer dependencies, because Pi provides both to an extension at runtime. The root `bun.lock` pins `typebox` for the generator, which checks hook files against it, and for the tests under `tests/pi/`, which load the extension outside Pi.
+The root `package.json` declares `typebox` and the optional `@earendil-works/pi-coding-agent` as peer dependencies, because Pi provides both to an extension at runtime. The root `bun.lock` pins `typebox` for the generator, which checks hook files against it, and for the tests under `tests/pi/`, which load the extension outside Pi. Those tests load Pi's package as a Pi process does, signal handlers included, from the copy that `plugins/package.json` pins and `plugins/bun.lock` locks. It sits on the extension's module path but outside every plugin and outside the root package that `pi install` installs, so no user downloads it, and npm never resolves it on a user's install.
 
-The generator writes `VERSION` into all five plugin manifests and the Pi `package.json` and stamps model defaults from `plugins/pstack/models.json`. It also owns the lines under the first heading of some files: the Codex preamble on each skill with a row in the Per-skill notes table of `skills/poteto-mode/references/codex-tools.md`, and the driver-skill line on the playbooks in `DRIVER_PLAYBOOKS`. Either line anywhere else fails the generator, so a skill gets the preamble by gaining a notes row. The GitHub Copilot preamble comes the same way from the Per-skill notes table of `copilot-tools.md` and follows any Codex preamble; the Muse preamble comes from `muse-tools.md` and follows both. For Muse it also stamps the `.muse-plugin/plugin.json` skill list from the skills tree, and `muse plugins validate plugins/pstack` plus `tests/muse.test.mjs` check the bundle the same way the Muse CLI does. No skill file carries a Pi line: `poteto-mode/SKILL.md` points at `pi-tools.md` once, and a skill's Pi note is a row in that file. For Copilot it also stamps the role list in `skills/setup-pstack/scripts/sheet.awk`, the roles-by-tier table in `setup-pstack/copilot.md`, and the role-model skill list in `hooks/session-start-copilot.md` from `models.json`. It validates each skill's `name` and `description`, then generates a Codex prompt for each public skill using the [slash-command table](docs/reference.md#slash-commands).
+Read a format that has a spec, such as YAML, JSON, or Markdown, with a parser the runtime already ships rather than a new one, as `pi/agent-files.ts` reads agent frontmatter with Pi's `parseFrontmatter`. Pi resolves `@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-tui`, and `typebox` for every extension it loads, and no other package. The session hooks are the exception, because they run under `sh` and PowerShell before any runtime is loaded.
+
+The generator writes `VERSION` into all five plugin manifests and the Pi `package.json` and stamps model defaults from `plugins/pstack/models.json`. It writes the runtime sentence in the Platform Adaptation section of `skills/poteto-mode/SKILL.md` from `RUNTIMES` in `tools/runtimes.mjs`, one mapping pointer per row in row order, so a new runtime gets its pointer by gaining a row. It also owns the lines under the first heading of some files: the Codex preamble on each skill with a row in the Per-skill notes table of `skills/poteto-mode/references/codex-tools.md`, and the driver-skill line on the playbooks in `DRIVER_PLAYBOOKS`. Either line anywhere else fails the generator, so a skill gets the preamble by gaining a notes row. The GitHub Copilot preamble comes the same way from the Per-skill notes table of `copilot-tools.md` and follows any Codex preamble; the Muse preamble comes from `muse-tools.md` and follows both. For Muse it also stamps the `.muse-plugin/plugin.json` skill list from the skills tree and its `SessionStart` hooks from `MUSE_HOOKS` in `tools/runtimes.mjs`, and `muse plugins validate plugins/pstack` plus `tests/muse.test.mjs` check the bundle the same way the Muse CLI does. No skill file carries a Pi line: `poteto-mode/SKILL.md` points at `pi-tools.md` once, and a skill's Pi note is a row in that file. For Copilot it also stamps the role list in `skills/setup-pstack/scripts/sheet.awk`, the roles-by-tier table in `setup-pstack/copilot.md`, and the role-model skill list in `hooks/session-start-copilot.md` from `models.json`. It validates each skill's `name` and `description`, and checks that the [slash-command table](docs/reference.md#slash-commands) has one row for each public skill.
 
 It also copies the four files in `PORTABLE_ASSETS` into the skills-only installation and removes stale generated files. `NOTICE-skills.md` supplies the notice included with those skills.
 
@@ -56,15 +61,19 @@ The generator rejects missing Markdown links, links outside the skills tree, and
 
 CI runs `bun tools/generate.mjs --check`, which writes nothing and fails naming each generated file that is stale, missing, or orphaned, so commit the generator's output. Run the same command locally to preview CI. It checks your working tree, not the commit, so a gitignored file such as `.DS_Store` in a generated directory fails only locally, and uncommitted regenerated output passes only locally. `.pre-commit-config.yaml` runs the same command before each commit once you run `prek install` (or `pre-commit install`) in your clone.
 
-When adding a skill, include `name` and `description` in its frontmatter. Public skills also need a row in the slash-command table. The row supplies the Codex menu description and ordering. The generator reports any skill missing a row or any row without a skill.
+When adding a skill, include `name` and `description` in its frontmatter. Public skills also need a row in the slash-command table. The generator reports any skill missing a row or any row without a skill.
 
 Change model defaults in `models.json`, never in a skill body. A role names a tier from `tiers` (`default`, `strongest`, or `panel`), so moving a tier is one edit, the `codex` block gives the Codex example for each tier, and the `pi` block maps each available family name to a Pi model ID once per Pi provider, with a `fallback` provider for sessions on any other. The generator checks the configuration's structure as it loads it (`parseModels` in `tools/generate.mjs`) and fails naming the offending role, tier, or slug. `tests/models.test.mjs` proves each malformed shape is rejected and checks that skills name every role they use. A full `claude-*` ID or a backticked available name such as `` `fable` `` outside a generated region fails the generator with its file and line.
 
 `bun test tests/` covers the generator, the sync tool, the link validator, and `tests/invariants.test.mjs`, which builds fixture trees that must trip each layout invariant. One check is behavioral and lives in `tests/skill-collision-repro.sh`: it needs the `claude` CLI and API access and makes one haiku call to prove a user-typed `/plugin:name` reaches a skill with no `commands/` present. CI cannot run it, so run it locally at least once before a release.
 
-If you touched `plugins/pstack/pi/` or `pi-tools.md`, run the Pi checks against a signed-in `pi` 1.1 as well. `bun tools/typecheck-pi.mjs` typechecks the extension under strict against the installed Pi package's own types; it uses `PI_PACKAGE_DIR` when set and otherwise looks under the global npm root, then Homebrew's `pi-coding-agent` formula (`$(brew --prefix)/opt/pi-coding-agent/libexec/lib/node_modules`), then bun's global directory (`BUN_INSTALL_GLOBAL_DIR`, then `$BUN_INSTALL/install/global`, then `$XDG_CACHE_HOME/.bun/install/global`, then `~/.bun/install/global` and `~/.cache/.bun/install/global`), as `tests/pi/catalog.test.mjs` and `tests/pi/runtime.test.mjs` do through `tools/pi-package.mjs`. CI's `Pi extension types` job installs the pinned release in the global npm root. `PSTACK_PI_LIVE=1 bun test tests/pi/live.test.mjs` drives the extension through real `pi` processes in about five minutes. It makes real model calls, on the shipped `openai` models by default. Set `PSTACK_PI_LIVE_PROVIDER=anthropic` to call the Claude models instead, or set `PSTACK_PI_LIVE_MODELS` to a `pi models:` line to replace individual models.
+If you touched `plugins/pstack/pi/` or `pi-tools.md`, run the Pi checks against a signed-in `pi` 1.5.1 as well. `bun tools/typecheck-pi.mjs` typechecks the extension under strict against the installed Pi package's own types; it uses `PI_PACKAGE_DIR` when set and otherwise looks under the global npm root, then Homebrew's `pi-coding-agent` formula (`$(brew --prefix)/opt/pi-coding-agent/libexec/lib/node_modules`), then bun's global directory (`BUN_INSTALL_GLOBAL_DIR`, then `$BUN_INSTALL/install/global`, then `$XDG_CACHE_HOME/.bun/install/global`, then `~/.bun/install/global` and `~/.cache/.bun/install/global`), as `tests/pi/catalog.test.mjs` and `tests/pi/runtime.test.mjs` do through `tools/pi-package.mjs`. CI's `Pi extension types` job installs the pinned release in the global npm root. `PI_FLOOR` in `tools/pi-package.mjs` names that release, and `tests/pi-package.test.mjs` fails when CI's install line or one of the statements it lists names another. When the installed Pi is older than `PI_FLOOR`, `tests/pi/catalog.test.mjs` and `tests/pi/slash.test.mjs` skip the checks that read it and print a warning, unless `PSTACK_PI_REQUIRE_CATALOG=1` or `PSTACK_PI_REQUIRE_RUNTIME=1` is set. To run those checks, set `PI_PACKAGE_DIR` to a package of that release or a newer one. After `bun install` in `plugins/`, `PI_PACKAGE_DIR=plugins/node_modules/@earendil-works/pi-coding-agent` is one. `PSTACK_PI_LIVE=1 bun test tests/pi/live.test.mjs` drives the extension through real `pi` processes in about five minutes. It makes real model calls, on the shipped `openai` models by default. Set `PSTACK_PI_LIVE_PROVIDER=anthropic` to call the Claude models instead, or set `PSTACK_PI_LIVE_MODELS` to a `pi models:` line to replace individual models.
 
 If you touched `plugins/pstack/hooks/`, `copilot-tools.md`, or `setup-pstack`, run `tests/copilot-smoke.sh` against a signed-in `copilot` CLI. It installs the checkout into a throwaway `HOME` and `COPILOT_HOME`, spends about twenty premium requests, and skips when `copilot` is missing. Set `SMOKE_GITHUB=<owner>/<repo>@<ref>` to repeat the plugin-file checks on a GitHub marketplace install of a pushed ref.
+
+If you touched the Grok plugin manifest, routing skill, or mapping, run `python3 tests/grok-smoke.py` with Grok Build installed. It uses an isolated home and synthetic local provider to check the routing description and explicit skill content; it does not make real model calls.
+
+If you touched `plugins/pstack/hooks/`, `minimax-tools.md`, or the plugin's manifests, run `tests/minimax-smoke.sh`. It installs `@minimax-ai/code` into a throwaway npm prefix, or uses the `mcode` that `MCODE` names, copies the checkout into a throwaway `MINIMAX_DATA_DIR` as a local plugin, and checks that MiniMax Code reads it through the Claude Code manifest with every skill and agent. It makes no model calls and needs no sign-in.
 
 If you touched `skills/poteto-mode/scripts/`:
 
@@ -72,7 +81,7 @@ If you touched `skills/poteto-mode/scripts/`:
 cd plugins/pstack/skills/poteto-mode/scripts
 bun install --frozen-lockfile
 bun run typecheck
-bun test orch watch-pr check-plan.test.ts
+bun test watch-pr
 bunx prettier@3.6.2 --check .
 ```
 
@@ -94,7 +103,7 @@ uvx zizmor@1.29.0 --persona pedantic --min-severity low --collect all -- .
 
 ## Things that will fail CI
 
-- **A `plugins/pstack/commands/` directory.** Claude Code renders commands and user-invocable skills in the same slash menu, so a trampoline paired with its skill duplicates every `/pstack:<name>` row ([#22](https://github.com/michael-denyer/pstack-claude/issues/22)). Codex stubs live in `plugins/pstack/.codex-plugin/prompts/`. An upstream sync will try to reintroduce `commands/`; move any new stubs across.
+- **A `plugins/pstack/commands/` directory.** Claude Code renders commands and user-invocable skills in the same slash menu, so a trampoline paired with its skill duplicates every `/pstack:<name>` row ([#22](https://github.com/michael-denyer/pstack-claude/issues/22)). Remove the directory; each skill already serves its own slash command.
 - **`disable-model-invocation` in a skill's frontmatter.** On a skill it makes the Skill tool refuse the invocation outright, which breaks the SessionStart mandate. The `principle-*` leaves use `user-invocable: false` instead.
 - **Stale generated output.** The `Generated files current` job runs `bun tools/generate.mjs --check`, which fails naming each generated file to write or orphan to remove. Editing `VERSION` without regenerating, hand-editing a manifest's `version` field, or bumping without a matching `CHANGES.md` heading all land here. The same run validates `hooks/hooks.json`, the Codex hooks file `.codex-plugin/plugin.json` names, and the Copilot hooks file `.github/plugin/plugin.json` names: every `${CLAUDE_PLUGIN_ROOT}` path a command names, or `${COPILOT_PLUGIN_ROOT}` path in the Copilot file, must exist in the plugin.
 - **An unresolved sync conflict.** `bun tools/generate.mjs` fails on any line under `plugins/pstack` that starts with seven `<`, `|`, `=`, or `>` followed by a space or the line end, and names the file and line. A sync writes the `<`, `=`, and `>` markers for every text conflict. A `|` line comes from a merge run by hand under a `diff3` conflict style.
@@ -105,10 +114,11 @@ uvx zizmor@1.29.0 --persona pedantic --min-severity low --collect all -- .
 - **A workflow file that fails `actionlint`.** Invalid YAML, a malformed expression, an unknown runner label, or a `needs:` pointing at a job that does not exist. Run `actionlint` from the repository root.
 - **A Markdown correctness error.** Reversed link syntax, an empty link target, a missing image alt, a fragment link to a heading that is not there, or an undefined or unused reference definition. The rule set is deliberately correctness-only and lives in `.markdownlint-cli2.jsonc`. Run `npx --yes markdownlint-cli2@0.18.1 '**/*.md'`.
 - **A broken relative link in any Markdown file.** The link job resolves file and fragment targets offline and never touches a remote URL, so external link rot cannot fail your PR. Run `lychee --offline --include-fragments --exclude-path node_modules --exclude-path .git '**/*.md'`.
+- **A plugin-scanner score below 75.** The `HOL Plugin Scanner` job runs HOL's `plugin-scanner`, the check the [awesome-ai-plugins](https://github.com/hashgraph-online/awesome-ai-plugins) catalog runs before it lists a plugin, and fails when the score drops below 75. A finding alone does not fail the job. A missing `plugins/pstack/LICENSE` and a long placeholder `api_key` in a test each cost points before [#427](https://github.com/michael-denyer/pstack-claude/pull/427).
 
 ## Dependency updates
 
-Dependabot keeps the pinned action SHAs current. The vendored scripts' one runtime dependency (`commander`) follows upstream's pin and moves with `tools/sync.mjs`; `osv-scanner` scans every `bun.lock` weekly, so a CVE still surfaces. The root `bun.lock` pins `typebox`, which the generator and the Pi extension tests import. If you bump it by hand, run `bun install` and commit the resulting `bun.lock` in the same change.
+Dependabot keeps the pinned action SHAs current. The vendored scripts' one runtime dependency (`commander`) follows upstream's pin and moves with `tools/sync.mjs`; `osv-scanner` scans every `bun.lock` weekly, so a CVE still surfaces. The root `bun.lock` pins `typebox`, which the generator and the Pi extension tests import, and `plugins/bun.lock` pins the copy of Pi the tests load. If you bump either by hand, run `bun install` in its directory and commit the resulting `bun.lock` in the same change.
 
 ## Releasing
 
@@ -124,6 +134,6 @@ So: any PR that changes skill behavior either bumps the version itself or is fol
 
 ## Reporting bugs
 
-Include the pstack version, the Claude Code (or Codex, Pi, or GitHub Copilot) version, the Herdr version for a dispatch bug, and the reproduction steps. [#22](https://github.com/michael-denyer/pstack-claude/issues/22) is the model to copy: it named versions, gave numbered steps, and included the experiment that isolated the cause.
+Include the pstack version, the Claude Code (or Codex, Pi, GitHub Copilot, Muse, or MiniMax Code) version, the Herdr version for a dispatch bug, and the reproduction steps. [#22](https://github.com/michael-denyer/pstack-claude/issues/22) is the model to copy: it named versions, gave numbered steps, and included the experiment that isolated the cause.
 
 Reproduce the bug on the latest release before you file it, because only that release receives fixes. The [bug report form](.github/ISSUE_TEMPLATE/bug_report.yml) asks for each of these fields. An issue filed through `gh` or the API skips the form, so give the same fields in the same order.

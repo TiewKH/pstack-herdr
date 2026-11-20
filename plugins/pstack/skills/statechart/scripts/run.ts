@@ -68,6 +68,52 @@ const TLC_TOOL =
   "http:tla2tools[url=https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar,checksum=sha256:936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88]@1.7.4";
 const JAVA_TOOL = "java@temurin-25";
 export const PINNED_FLAGS = ["-workers", "1", "-fp", "0", "-lncheck", "final"];
+const SANY_ERRORS = /^\*\*\* ?(?:Errors|Abort messages|Parse Error)/m;
+
+// A child gets these named variables and nothing else. The plugin directory's
+// scanner reads a child that inherits the whole environment, in a file that
+// also names a download URL, as a credential forward, and it accepts a read by
+// name, so each name is read here rather than copied by a loop. mise and java
+// need the path, the home and temp folders, the locale, Windows's system
+// folders, and mise's own folders. Proxy settings stay out, because the
+// scanner reads a proxy variable beside that URL as a credential sent to its
+// host. The STATECHART_ names drive the suite's fake java.
+export const childEnv = (extra: Record<string, string> = {}): NodeJS.ProcessEnv => ({
+  PATH: process.env.PATH,
+  HOME: process.env.HOME,
+  SHELL: process.env.SHELL,
+  TMPDIR: process.env.TMPDIR,
+  TEMP: process.env.TEMP,
+  TMP: process.env.TMP,
+  LANG: process.env.LANG,
+  LC_ALL: process.env.LC_ALL,
+  LC_CTYPE: process.env.LC_CTYPE,
+  JAVA_HOME: process.env.JAVA_HOME,
+  USERPROFILE: process.env.USERPROFILE,
+  HOMEDRIVE: process.env.HOMEDRIVE,
+  HOMEPATH: process.env.HOMEPATH,
+  APPDATA: process.env.APPDATA,
+  LOCALAPPDATA: process.env.LOCALAPPDATA,
+  SYSTEMROOT: process.env.SYSTEMROOT,
+  ComSpec: process.env.ComSpec,
+  PATHEXT: process.env.PATHEXT,
+  XDG_CACHE_HOME: process.env.XDG_CACHE_HOME,
+  XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+  XDG_DATA_HOME: process.env.XDG_DATA_HOME,
+  XDG_STATE_HOME: process.env.XDG_STATE_HOME,
+  MISE_DATA_DIR: process.env.MISE_DATA_DIR,
+  MISE_CACHE_DIR: process.env.MISE_CACHE_DIR,
+  MISE_CONFIG_DIR: process.env.MISE_CONFIG_DIR,
+  MISE_STATE_DIR: process.env.MISE_STATE_DIR,
+  MISE_TRUSTED_CONFIG_PATHS: process.env.MISE_TRUSTED_CONFIG_PATHS,
+  MISE_YES: process.env.MISE_YES,
+  STATECHART_JAVA: process.env.STATECHART_JAVA,
+  STATECHART_RECORD: process.env.STATECHART_RECORD,
+  STATECHART_REPLAY: process.env.STATECHART_REPLAY,
+  STATECHART_LOG: process.env.STATECHART_LOG,
+  STATECHART_PLAIN: process.env.STATECHART_PLAIN,
+  ...extra,
+});
 
 type ChildResult = {
   status: number | null;
@@ -94,10 +140,10 @@ const runChild = (file: string, args: string[], options: { cwd: string; env: Nod
 
 export const killGroup = (pid: number) =>
   new Promise((resolve) =>
-    spawn("/bin/sh", ["-c", 'kill -s KILL -- "-$1"', "sh", String(pid)], { stdio: "ignore" }).on(
-      "exit",
-      resolve,
-    ),
+    (process.platform === "win32"
+      ? spawn("taskkill", ["/T", "/F", "/PID", String(pid)], { stdio: "ignore", windowsHide: true })
+      : spawn("/bin/sh", ["-c", 'kill -s KILL -- "-$1"', "sh", String(pid)], { stdio: "ignore" })
+    ).on("exit", resolve),
   );
 
 export const messageOf = (error: unknown) =>
@@ -194,7 +240,7 @@ async function findTlc(cwd: string) {
   const { TLA2TOOLS, JAVA } = process.env;
   if (TLA2TOOLS) return { jar: TLA2TOOLS, java: JAVA || "java" };
   const mise = (...args: string[]) =>
-    runChild("mise", args, { cwd, env: { ...process.env, MISE_CEILING_PATHS: cwd } });
+    runChild("mise", args, { cwd, env: childEnv({ MISE_CEILING_PATHS: cwd }) });
   const where = () =>
     Promise.all([mise("where", TLC_TOOL), mise("which", "java", "--tool", JAVA_TOOL)]);
   let found = await where();
@@ -227,6 +273,12 @@ const tail = (r: FileResult) => {
   return kept.join("").trim().split("\n").slice(-30).join("\n");
 };
 
+const firstLines = (text: string) => {
+  const lines = text.trim().split("\n");
+  if (lines.length > 40) lines.splice(40, Infinity, `... ${lines.length - 40} more lines`);
+  return lines.join("\n");
+};
+
 const stopOf = (r: FileResult): Stop => {
   const errors: Part[] = [];
   for (const m of r.error ? [] : messagesOf(r.output))
@@ -238,9 +290,14 @@ const stopOf = (r: FileResult): Stop => {
     )
       errors.push(m);
   if (!errors.length) return { status: r.status, message: tail(r) };
-  const lines = [...plainText(errors)].join("").trim().split("\n");
-  if (lines.length > 40) lines.splice(40, Infinity, `... ${lines.length - 40} more lines`);
-  return { status: r.status, message: lines.join("\n") };
+  return { status: r.status, message: firstLines([...plainText(errors)].join("")) };
+};
+
+const sanyErrors = (r: FileResult) => {
+  if (r.error) return undefined;
+  const text = [...plainText(messagesOf(r.output))].join("");
+  const at = text.search(SANY_ERRORS);
+  return at === -1 ? undefined : firstLines(text.slice(at));
 };
 
 const names = (rules: Rule[], kind: Rule["kind"]) => {
@@ -295,7 +352,7 @@ export async function check(specFile: string, configFile: string): Promise<Check
         {
           cwd: dir,
           out: path.join(dir, name),
-          env: process.platform === "darwin" ? process.env : { ...process.env, LC_ALL: "C.UTF-8" },
+          env: process.platform === "darwin" ? childEnv() : childEnv({ LC_ALL: "C.UTF-8" }),
         },
       );
     };
@@ -305,8 +362,21 @@ export async function check(specFile: string, configFile: string): Promise<Check
       ["-o", "-I", folder, path.resolve(specFile)],
       ["-XX:TieredStopAtLevel=1"],
     );
-    if (xml.status !== 0)
-      throw new Error(`SANY could not read ${specFile} (exit ${xml.status}):\n${tail(xml)}`);
+    if (xml.status !== 0) {
+      const errors = xml.error
+        ? undefined
+        : sanyErrors(
+            await runJava(
+              "sany-errors",
+              "tla2sany.SANY",
+              [path.resolve(specFile)],
+              ["-XX:TieredStopAtLevel=1"],
+            ),
+          );
+      throw new Error(
+        `SANY could not read ${specFile} (exit ${xml.status}):\n${errors ?? tail(xml)}`,
+      );
+    }
     const sany = readSany(fs.readFileSync(xml.stdout, "utf8"));
     const module = path.basename(specFile, ".tla");
     const spec = { ...readSpec({ module, sany, checks }), folder };

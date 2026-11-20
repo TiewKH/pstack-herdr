@@ -11,175 +11,21 @@ On GitHub Copilot, read the [platform mapping](../poteto-mode/references/copilot
 
 On Muse, read the [platform mapping](../poteto-mode/references/muse-tools.md), including its per-skill notes, before following this skill.
 
-Choose the setup path from the runtime first:
+On Antigravity, read the [platform mapping](../poteto-mode/references/agy-tools.md), including its per-skill notes, before following this skill.
 
-- If `HERDR_ENV=1` or `HC_TERMINAL_ID` is set, follow **Herdr setup** below. Herdr-backed delegation does not read `~/.claude/pstack-models.md`; worker kind, account/config home, and model come from `~/.config/pstack-herdr/routes.yaml`.
-- Otherwise follow **Native setup**. On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following the native steps.
+If `HERDR_ENV=1` or `HC_TERMINAL_ID` is set, follow **Herdr setup** in [herdr.md](herdr.md) in place of the steps below. Herdr-backed delegation does not read `~/.claude/pstack-models.md`; worker kind, account/config home, and model come from `~/.config/pstack-herdr/routes.yaml`. Do not configure both layers unless the user explicitly wants native fallback behavior configured too.
 
-Do not configure both layers unless the user explicitly wants native fallback behavior configured too.
+Write the current runtime's per-role model override sheet. Each pstack skill names a default model inline; the override sheet adapts those defaults to the models you actually have access to.
 
-## Herdr setup
+On any runtime other than Claude Code, read [Other runtimes](references/runtimes.md) first. Its table gives the sheet path, how the sheet loads, and how to list models, and your runtime's section says which steps change. The rest of this file describes Claude Code.
 
-Herdr-backed delegation reads `~/.config/pstack-herdr/routes.yaml`. Do not hand-author that file. The deterministic writer is:
-
-```bash
-bun ../poteto-mode/scripts/herdr/configure.ts --input <setup.json>
-```
-
-The setup skill owns discovery and user choices. The script owns validation, canonical serialization, preservation rules, atomic writes, and idempotency.
-
-### 1. Detect worker runtimes and models
-
-Determine which worker CLIs are available for Herdr to launch: Claude Code, Codex, or both. Offer the Herdr worker IDs in [Models](#models) as the menu for each CLI, and keep only the ones that CLI accepts: `claude -p --model <id> "Reply with exactly OK"` and `codex exec -m <id> "Reply with exactly OK"` each answer `OK` for a usable ID. The menu is a starting point, not a limit: also offer any newer ID the CLI knows. For Codex, `codex debug models` lists every model with `visibility: list`. For Claude, try the next version up from each family's newest menu ID; an ID the installed Claude Code does not know fails with `isn't described by this version's model catalog`. Run the same `OK` check on each before writing it. Write full IDs into profiles. The worker CLI runs a full ID as that exact version, while a family name runs whichever model is current in that family, so a family name moves when a new model ships.
-
-If the user has additional authenticated CLI homes, ask for their paths. Do not copy, move, or inspect credentials. Treat each config home as an opaque authenticated profile.
-
-Multiple profiles may share the same config home. This is how one Claude or Codex subscription can provide multiple worker/model profiles; those workers share that account's concurrency, rate, and usage limits.
-
-### 2. Load current state
-
-If `~/.config/pstack-herdr/routes.yaml` already exists, read it and treat its profiles, roles, strategies, models, config homes, extra env, and orchestration as the current choices. Do not rewrite it by hand; reading is the load step. If the file is missing or empty, start from the detected runtimes and the example shape in step 4. If the file exists but does not parse, stop and show the error instead of guessing.
-
-When reconstructing setup JSON from an existing file, set each profile's `config_home` from `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, and keep any other `env` entries. Leave `config_home` out for the CLI's default home (`~/.claude`, `~/.codex`). Claude Code keeps its onboarding state under `$CLAUDE_CONFIG_DIR`, so a worker given the default home boots into first-run onboarding; the dispatcher ignores such a value at run time. Omit `orchestration` from the JSON unless the user is changing it, so the writer preserves the current values.
-
-### 3. Map and confirm
-
-Show every profile (name, kind, model, effort, config home, extra env) and every role with its current profile pool and strategy. Call out which profiles share a subscription/config home. Mark any model not in the detected set as needing a choice.
-
-Ask whether to accept as-is or change specific profiles or roles. Prefer `AskUserQuestion` over free text.
-
-Collect profiles with:
-
-- a stable profile `name`,
-- `kind`: `claude` or `codex`,
-- optional `model` (use `inherit` when no model should be forced),
-- optional `effort`, a reasoning-effort override passed straight to the worker CLI: `claude --effort <level>` (`low`, `medium`, `high`, `xhigh`, `max`) or `codex -c model_reasoning_effort="<level>"` (`low`, `medium`, `high`, `xhigh`, `max`, `ultra`; which ones a model takes is in `codex debug models`). Leave unset to run the CLI's own default. Effort is a separate axis from model — offer it as its own question rather than folding it into the model choice,
-- optional `config_home`,
-- optional extra `env` entries.
-
-Collect all nine required semantic roles:
-
-- `explorer`
-- `implementation`
-- `difficult-implementation`
-- `judgment`
-- `reviewer`
-- `arena-candidate`
-- `arena-judge`
-- `verifier`
-- `subcoordinator`
-
-Each role has a non-empty `profiles` array and `strategy` of `first` or `spread`.
-
-Prefer capable/cheap profiles for `explorer` and `verifier`, stronger profiles for `difficult-implementation`, `judgment`, `arena-judge`, and `subcoordinator`, and diverse pools for `reviewer` and `arena-candidate` when more than one runtime/model is available.
-
-A worker that delegates reaches Herdr over a local socket, and Codex's `workspace-write` sandbox blocks that socket while its network is off. A Codex profile routed to `subcoordinator` therefore needs `network_access = true` under `[sandbox_workspace_write]` in that profile's `$CODEX_HOME/config.toml`. The setting loosens every session that uses that Codex home, not only subcoordinators. When the user routes `subcoordinator` to a Codex profile, say so and ask whether that home has the setting. Do not edit Codex's config yourself. Offer a Claude profile for the role as the alternative. Claude Code does not sandbox its shell by default.
-
-### 4. Write the setup input JSON
-
-Create a temporary JSON file shaped exactly like this (a committed copy lives at `config/setup.example.json`):
-
-```json
-{
-  "profiles": [
-    {
-      "name": "claude-strong",
-      "kind": "claude",
-      "model": "<confirmed-strong-model>",
-      "effort": "high"
-    },
-    {
-      "name": "claude-fast",
-      "kind": "claude",
-      "model": "<confirmed-fast-model>"
-    }
-  ],
-  "roles": {
-    "explorer": { "profiles": ["claude-fast"], "strategy": "first" },
-    "implementation": { "profiles": ["claude-fast"], "strategy": "first" },
-    "difficult-implementation": { "profiles": ["claude-strong"], "strategy": "first" },
-    "judgment": { "profiles": ["claude-strong"], "strategy": "first" },
-    "reviewer": { "profiles": ["claude-strong", "claude-fast"], "strategy": "spread" },
-    "arena-candidate": { "profiles": ["claude-strong", "claude-fast"], "strategy": "spread" },
-    "arena-judge": { "profiles": ["claude-strong"], "strategy": "first" },
-    "verifier": { "profiles": ["claude-fast"], "strategy": "first" },
-    "subcoordinator": { "profiles": ["claude-strong"], "strategy": "first" }
-  }
-}
-```
-
-Only include `orchestration` when the user explicitly changes it:
-
-```json
-{
-  "orchestration": {
-    "max_depth": 3,
-    "default_timeout_ms": 180000
-  }
-}
-```
-
-Do not write YAML yourself.
-
-### 5. Preview, then apply
-
-Preview the exact canonical YAML first:
-
-```bash
-bun ../poteto-mode/scripts/herdr/configure.ts \
-  --input <setup.json> \
-  --dry-run
-```
-
-Then apply it:
-
-```bash
-bun ../poteto-mode/scripts/herdr/configure.ts \
-  --input <setup.json>
-```
-
-The script deterministically:
-
-1. validates profile names, kinds, env keys, strategies, and all nine required roles;
-2. rejects role references to unknown profiles;
-3. preserves existing `orchestration` values unless the JSON explicitly changes them;
-4. preserves unrelated existing `env` entries on reused profile names while replacing the runtime config-home variable;
-5. writes profiles in sorted order and roles in canonical semantic-role order;
-6. writes `~/.config/pstack-herdr/routes.yaml` atomically;
-7. returns `unchanged` when the same input produces the same bytes.
-
-The same subscription/config home may appear on several profiles. Separate subscriptions/accounts require separately authenticated config homes.
-
-### 6. Confirm effective behavior
-
-Tell the user:
-
-- the route file path,
-- which profiles share the same subscription/config home,
-- which role maps to which profile pool,
-- which profiles force a model and which inherit,
-- which profiles set an effort override and which run the CLI's own default,
-- and that the routes take effect for pstack delegation while running inside Herdr.
-
-If the user also wants native non-Herdr sessions configured, continue with **Native setup**.
-
-## Native setup
-
-On GitHub Copilot, follow [the Copilot setup](copilot.md) in place of steps 1, 3, 4, and 7 and step 6's header.
-
-On another runtime, read [Other runtimes](#other-runtimes) below for where the sheet lives and how it loads; the steps are the same.
-
-Write the current runtime's per-role model override sheet, using the path in [Other runtimes](#other-runtimes). Each pstack skill names a default model inline; the override sheet adapts those defaults to the models you actually have access to.
-
-Claude Code has no auto-applied "rules" mechanism like Cursor's `.mdc`. The Claude Code config directory is `$CLAUDE_CONFIG_DIR` when that variable is set and `~/.claude` otherwise. This skill calls it `<config>`. Inclusion is explicit: the user adds a line to `<config>/CLAUDE.md` (or their project `CLAUDE.md`) such as:
+On Claude Code the config directory is `$CLAUDE_CONFIG_DIR` when that variable is set and `~/.claude` otherwise. This skill calls it `<config>`, and the user sheet is `<config>/pstack-models.md`. A project sheet, `.claude/pstack-models.md` at the repository root (`git rev-parse --show-toplevel`; outside a repository, the directory Claude Code starts in), is committed with the repository and replaces the user sheet in that project. The session hook reads it whenever it exists. The model rows defer to it through the line step 6 writes under its heading, so a hand-written project sheet needs that line too. Claude Code has no auto-applied "rules" mechanism like Cursor's `.mdc`, so inclusion is explicit: the user adds a line to `<config>/CLAUDE.md` such as:
 
 ```text
 @<config>/pstack-models.md
 ```
 
-with `<config>` written as the resolved path, so the file is loaded as context for every session.
-
-The Codex home directory is `$CODEX_HOME` when that variable is set and `~/.codex` otherwise. This skill calls it `<codex-home>`.
+with `<config>` written as the resolved path, so the file is loaded as context for every session. A project sheet loads from `@.claude/pstack-models.md` in the `CLAUDE.md` at the repository root.
 
 ### 1. Detect available models
 
@@ -187,30 +33,32 @@ Enumerate the model names the `Agent` tool's `model` parameter accepts in this s
 
 ### 2. Load current state
 
-The default role-to-model mapping is the rule shape shown in the Write the override sheet step below. If the current runtime's sheet already exists, read it and treat its values as the current choices. Otherwise start from those defaults. A line whose role is not in that shape, such as `how critics`, is from a retired role. Drop it. An older sheet may name full model IDs that start with `claude-`, which the `Agent` tool rejects. Replace each with its family name, the word after `claude-`.
+On Claude Code, first ask whether to configure the user sheet, for every project, or the project sheet, for this repository on any machine. The rest of the steps use the chosen sheet.
+
+The default role-to-model mapping is the rule shape shown in the Write the override sheet step below. If the current runtime's sheet already exists, read it and treat its values as the current choices. Otherwise start from those defaults. A line whose role is not in that shape, such as `how critics`, `architect runners`, `reflect tooling`, or `why investigators`, is from a retired role. Drop it. An older sheet may name full model IDs that start with `claude-`, which the `Agent` tool rejects. Replace each with its family name, the word after `claude-`.
 
 ### 3. Map and confirm
 
-Show every role with its current model, marking any real slug not in the detected set as needing a choice. Also list each line step 2 dropped or rewrote. Ask whether to accept as-is or change specific roles, offering the detected models plus `inherit-parent` and `auto` as the options. Prefer `AskUserQuestion` over free text. For panel roles (arena runners, architect runners, interrogate reviewers) the value is a list, and one subagent runs per entry, alias entries included, so the list length sets the count. `arena cross-judge pool` is also a list, but Arena runs one judge. It tries only values from a family other than the parent's, in list order, so order it by preference. An `inherit-parent` or `auto` value never judges. `swarm workers` is the default model for every worker unless a race or comparison assigns another model per arm.
+Show every role with its current model, marking any real slug not in the detected set as needing a choice. Also list each line step 2 dropped or rewrote. Ask whether to accept as-is or change specific roles, offering the detected models plus `inherit-parent` and `auto` as the options. Prefer `AskUserQuestion` over free text. For panel roles (arena runners, interrogate reviewers) the value is a list, and one subagent runs per entry, alias entries included, so the list length sets the count. `arena cross-judge pool` is also a list, but Arena runs one judge. It tries only values from a family other than the parent's, in list order, so order it by preference. An `inherit-parent` or `auto` value never judges. `swarm workers` is the default model for every worker unless a race or comparison assigns another model per arm.
 
-Then ask for the default reasoning effort, the `default effort` line. It is `session`, which keeps the parent session's effort, or one of the levels in [Models](#models). Start from the default listed there. Every role value without a suffix runs at it. Then ask whether any role should run at another level. On Claude Code a role value may carry one after its slug, as in `<slug> @xhigh`; panel entries take their own, as in `<slug> @xhigh, <slug> @max`. Each level is passed as the dispatch's effort, so the choice holds without changing the session. Leave the suffix off for the default effort.
+Then ask for the default reasoning effort, the `default effort` line. It is `session`, which keeps the parent session's effort, or one of the levels in [Models](#models). Start from the default listed there. Every role value without a suffix runs at it. Then ask whether any role should run at another level. A role value may carry one after its slug, as in `<slug> @xhigh`; panel entries take their own, as in `<slug> @xhigh, <slug> @max`. Each level is passed as the dispatch's effort, so the choice holds without changing the session. Leave the suffix off for the default effort.
 
 ### 4. Choose whether the session hook routes tasks
 
-On Claude Code and Codex, the plugin's `SessionStart` hook injects the poteto-mode mandate on startup, resume, clear, and compact. Codex asks the user to trust plugin hooks through `/hooks` before running them. On Pi, the pstack extension adds the same mandate to the system prompt at every agent start. On Muse, the native plugin's `SessionStart` hook injects the mandate once the user approves the plugin's hooks with `muse plugins approve pstack`. Ask whether to keep the hook. The default is on. The answer is the `session hook` line in the current runtime's sheet: `on` or `off`. With no sheet or no line, the hook injects. The line is inert on other runtimes.
+On Claude Code, the plugin's `SessionStart` hook injects the poteto-mode mandate on startup, resume, clear, and compact. Ask whether to keep the hook. The default is on. The answer is the `session hook` line in the current runtime's sheet: `on` or `off`. With no sheet or no line, the hook injects. The line is inert on other runtimes without a pstack routing hook.
 
 ### 5. Validate
 
-Every real slug written must be in the detected set. `inherit-parent` and `auto` always pass. Validate the slug without any `@<level>` suffix, and the level against the effort levels in [Models](#models). The `default effort` value is one of those levels or `session`. On Codex, the levels are the `reasoning_effort` values your Codex models accept instead. If a chosen real slug or level is not available, stop and ask again.
+Every real slug written must be in the detected set. `inherit-parent` and `auto` always pass. Validate the slug without any `@<level>` suffix, and the level against the effort levels in [Models](#models). The `default effort` value is one of those levels or `session`. If a chosen real slug or level is not available, stop and ask again.
 
 ### 6. Write the override sheet
 
-Write the current runtime's sheet with the shape below. Overwrite the whole file so re-runs stay idempotent.
+Write the current runtime's sheet with the shape below. Overwrite the whole file so re-runs stay idempotent. A project sheet also gets this line under its heading, so a session that loads both sheets knows which one counts: `This project's sheet. In this repository it replaces the user's pstack-models.md; ignore that sheet's lines.`
 
 ```markdown
 # pstack model configuration
 
-Per-role model overrides for pstack skills. Each pstack SKILL.md names its defaults in a Models section; the values here override those defaults. Delete a line to fall back to the skill default. A value of `inherit-parent` or `auto` runs that role on the parent session's model (the `Agent` call omits `model`); an alias entry in a panel list still counts toward that panel's fan-out. A model may carry a reasoning effort, as in `opus @xhigh` (levels: low, medium, high, xhigh, max); the role's subagent then runs at that level, each entry of a panel list on its own. `default effort` sets the level for a value without one; `session` keeps the parent session's effort. `session hook: off` stops the Claude Code, Codex, or Muse SessionStart hook, or the pstack Pi extension, from injecting the poteto-mode mandate; any other value, or no line, leaves it on.
+Per-role model overrides for pstack skills. Each pstack SKILL.md names its defaults in a Models section; the values here override those defaults. Delete a line to fall back to the skill default. A value of `inherit-parent` or `auto` runs that role on the parent session's model (the `Agent` call omits `model`); an alias entry in a panel list still counts toward that panel's fan-out. A model may carry a reasoning effort, as in `opus @xhigh` (levels: low, medium, high, xhigh, max); the role's subagent then runs at that level, each entry of a panel list on its own. `default effort` sets the level for a value without one; `session` uses the runtime's platform mapping to start from the parent session's effort. On Codex this requires active-turn metadata or an explicit effort choice. `session hook: off` stops the supported runtime's pstack routing hook from injecting the poteto-mode mandate; any other value, or no line, leaves it on.
 
 feature, refactoring: sonnet
 bug-fix: opus
@@ -218,17 +66,12 @@ perf-issue: opus
 hillclimb: opus
 judgment and prose: opus
 strongest judgment: fable
-how explorer: opus
-how explainer: opus
-why investigators: opus
-why synthesizer: opus
-reflect tooling: opus
-reflect judgment, divergent, synthesizer: opus
 arena runners: opus, fable, sonnet, haiku
 arena cross-judge pool: opus, fable, sonnet, haiku
 swarm workers: opus
-architect runners: opus, fable, sonnet, haiku
 interrogate reviewers: opus, fable, sonnet, haiku
+thermos reviewers: opus
+no-comments reviewer: opus
 
 default effort: session
 session hook: on
@@ -236,11 +79,7 @@ session hook: on
 
 ### 7. Wire it in
 
-On Claude Code, if `<config>/CLAUDE.md` does not already include `<config>/pstack-models.md`, append an `@` line naming the sheet's resolved path, such as `@~/.claude/pstack-models.md`, so the model rows load on every session. If the user prefers project scope, add the include to the project's `CLAUDE.md` instead.
-
-On Codex, paste the model rows and the `default effort` line into `<codex-home>/AGENTS.md`; Codex has no `@` include. Do not paste the `session hook` line there: the plugin hook reads it directly from `<codex-home>/pstack-models.md`.
-
-On Muse, no include line is needed: the plugin hook reads the sheet directly and injects its role lines at session start. It runs only after the user approves the plugin's hooks, so name `muse plugins approve pstack` when the hook has not run yet.
+On Claude Code, if `<config>/CLAUDE.md` does not already include `<config>/pstack-models.md`, append an `@` line naming the sheet's resolved path, such as `@~/.claude/pstack-models.md`, so the model rows load on every session. For a project sheet, append `@.claude/pstack-models.md` to the `CLAUDE.md` at the repository root instead, if it is not there, and tell the user to commit both files.
 
 ### 8. Confirm
 
@@ -254,21 +93,6 @@ Check whether the project has a way to drive the real app for proof (a project `
 
 Check whether the project already has a formal verification skill (a project skill that runs a model checker, a proof, or another verifier against the code). If not, offer once: "want a formal verification skill, so agents can prove a key property of your code holds in every case in scope, not only the cases tests reach? I can generate one with /create-formal-verification-skill." On yes, invoke [`/create-formal-verification-skill`](../create-formal-verification-skill/SKILL.md). On no, move on without pushing.
 
-## Other runtimes
-
-The role lines are the same everywhere. What differs is the sheet path, how the runtime loads it, and how you list models. Detect models with the runtime's own tool and never write a slug you have not seen listed. A runtime whose subagent call has no model parameter still gets the sheet, as the record of the user's choice, and applies it where it can. The `session hook` line applies to the Claude Code, Codex, and GitHub Copilot plugins and to the pstack Pi extension.
-
-| Runtime | Sheet | Load | List models | Status |
-| --- | --- | --- | --- | --- |
-| Claude Code | `<config>/pstack-models.md` | `@<config>/pstack-models.md` in `<config>/CLAUDE.md` | the `Agent` tool's model parameter | verified live |
-| Codex | `<codex-home>/pstack-models.md` | model rows: paste into `<codex-home>/AGENTS.md`; hook setting: read by the plugin | your configured Codex models, see [codex-tools.md](../poteto-mode/references/codex-tools.md#model-names) | hook contract tested; discovery verified |
-| Pi | `pstack-models.md` in the Pi agent directory, `$PI_CODING_AGENT_DIR` or `~/.pi/agent` | read by the pstack Pi extension, model rows and hook setting both; no include line | `pi --list-models`, see [pi-tools.md](../poteto-mode/references/pi-tools.md#model-names) and its `setup-pstack` note | extension contract tested offline; live results in the repository's `docs/pi-equivalence.md` |
-| GitHub Copilot (CLI and app) | `${COPILOT_HOME:-~/.copilot}/pstack-models.md` | the plugin hook checks it and injects its role lines at session start; skills-only installs read it with `view` | the `task` tool's `model` enum, see [copilot-tools.md](../poteto-mode/references/copilot-tools.md#model-names) | hook contract tested; CLI install smoke-tested |
-| Muse | `${XDG_CONFIG_HOME:-~/.config}/muse/pstack-models.md` | the plugin hook reads it and injects its role lines at session start, once hooks are approved; no include line | the model catalog (`muse model-profile show <model>` names each one), see [muse-tools.md](../poteto-mode/references/muse-tools.md#model-names) | hook contract tested; plugin install verified |
-| opencode | `~/.config/opencode/pstack-models.md` | add the path to the `instructions` array in `opencode.json` | the `models` slash command in the session | from published docs, no live session |
-| Gemini CLI | `~/.gemini/pstack-models.md` | `@~/.gemini/pstack-models.md` in `~/.gemini/GEMINI.md` | the `model` slash command in the session | from published docs, no live session |
-| Prime Agent | no documented sheet path; Prime's configuration chooses models | | | no live session |
-
 ## Models
 
 Stamped from `plugins/pstack/models.json` (edit there, rerun `tools/generate.mjs`).
@@ -278,5 +102,5 @@ Stamped from `plugins/pstack/models.json` (edit there, rerun `tools/generate.mjs
 - Reasoning effort levels: `low`, `medium`, `high`, `xhigh`, `max`
 - Default reasoning effort: `session`
 - Single-role default: `opus`
-- Herdr Claude worker IDs: Opus 5.5 (`claude-opus-5-5`), Opus 5 (`claude-opus-5`), Opus 4.8 (`claude-opus-4-8`), Opus 4.6 (`claude-opus-4-6`), Fable 5.1 (`claude-fable-5-1`), Fable 5 (`claude-fable-5`), Sonnet 5.5 (`claude-sonnet-5-5`), Sonnet 5 (`claude-sonnet-5`), Sonnet 4.6 (`claude-sonnet-4-6`), Haiku 4.5 (`claude-haiku-4-5`)
-- Herdr Codex worker IDs: GPT-6.1-Sol (`gpt-6.1-sol`), GPT-6.1-Terra (`gpt-6.1-terra`), GPT-6-Sol (`gpt-6-sol`), GPT-6-Astra (`gpt-6-astra`), GPT-6-Luna (`gpt-6-luna`), GPT-5.6-Sol (`gpt-5.6-sol`), GPT-5.6-Terra (`gpt-5.6-terra`), GPT-5.6-Luna (`gpt-5.6-luna`), GPT-5.5 (`gpt-5.5`)
+- Herdr Claude worker IDs: Opus 5.5 (`claude-opus-5-5`), Opus 5 (`claude-opus-5`), Opus 4.8 (`claude-opus-4-8`), Opus 4.6 (`claude-opus-4-6`), Fable 5.2 (`claude-fable-5-2`), Fable 5.1 (`claude-fable-5-1`), Fable 5 (`claude-fable-5`), Sonnet 5.5 (`claude-sonnet-5-5`), Sonnet 5 (`claude-sonnet-5`), Sonnet 4.6 (`claude-sonnet-4-6`), Haiku 4.5 (`claude-haiku-4-5`)
+- Herdr Codex worker IDs: GPT-6.2-Sol (`gpt-6.2-sol`), GPT-6.2-Astra (`gpt-6.2-astra`), GPT-6.1-Sol (`gpt-6.1-sol`), GPT-6.1-Terra (`gpt-6.1-terra`), GPT-6-Sol (`gpt-6-sol`), GPT-6-Astra (`gpt-6-astra`), GPT-6-Luna (`gpt-6-luna`), GPT-5.6-Sol (`gpt-5.6-sol`), GPT-5.6-Terra (`gpt-5.6-terra`), GPT-5.6-Luna (`gpt-5.6-luna`), GPT-5.5 (`gpt-5.5`)

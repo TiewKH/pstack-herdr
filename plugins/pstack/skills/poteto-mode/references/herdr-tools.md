@@ -36,15 +36,17 @@ A `PreToolUse` hook on `Agent` (`herdr-agent-gate.sh` under the plugin hooks dir
 |------------------------|------------------|
 | Dispatch a subagent (`Agent` / `Task`) | `herdr/dispatch.ts` |
 | Dispatch N parallel subagents in one turn | N dispatcher processes launched concurrently without `--wait`, then `--next` |
-| `subagent_type` | ignored; pass the semantic pstack `--role` |
+| `subagent_type` | not passed; pass the semantic pstack `--role`, and carry a typed agent's contract in the brief |
+| `subagent_type: "pstack:poteto-agent"` | after the `worker.md` line, the brief states the agent's contract: the worker is a delegate of a poteto-mode run, the coordinator owns the playbook and the todolist, and before any work it reads `SKILL.md` in the coordinator's `poteto-mode` folder in full, given by absolute path, including the Principles index |
 | `model` | omit unless overriding; `--role` selects a profile from `~/.config/pstack-herdr/routes.yaml` |
 | `effort` (a role's `@level`) | omit unless overriding with `--effort <level>`; a routed profile's `effort` becomes `--effort <level>` for Claude workers or `-c model_reasoning_effort="<level>"` for Codex workers |
 | `readonly: true` | `--readonly` |
-| `readonly: false` because Claude Ask mode strips MCP | still pass `--readonly`; it disables write tools and does not use Ask/plan mode |
 | `isolation: "worktree"` / exclusive branch | caller creates the worktree or branch, then passes it as `--cwd` |
 | `run_in_background: true` | omit `--wait`; collect with `--next` |
 | Wait for a subagent result | `--wait` for one worker; `--next` for the first of several |
 | The `Agent` tool rejects a model | a dispatch that errors on its model, or a worker whose output says its model is unknown or unavailable, counts as the rejection; apply the calling skill's fallback, such as replacing or dropping an arena seat, instead of ending the run. Without `--model` the model came from `routes.yaml`, so also tell the user which profile failed and to fix it with `/setup-pstack` |
+| First kickoff line, `Read <path>/worker.md before anything else.` | first line of the `--prompt-file` brief, with the absolute path of the coordinator's `poteto-mode` folder; `--readonly` adds its no-write constraint above that line and does not replace it. A worker that starts its own agent follows the same rule through the dispatcher |
+| A second opinion or reviewer on a model from another family | `--kind` naming the other CLI than the first worker's `kind` in its dispatch result (`claude` or `codex`), or `--profile` naming a profile of another family; when the role's pool has none, say the opinion ran on the same family |
 | Steer or resume a running agent (`SendMessage`) | no dispatcher equivalent; answer a `blocked` worker in its Herdr pane, or collect the worker and dispatch a follow-up whose brief carries the earlier output |
 
 Write substantial worker prompts to a temporary file, then invoke:
@@ -66,7 +68,7 @@ When you do pass `--model`, pass the model name only. Strip an `@<level>` suffix
 
 ### Model panels
 
-Herdr delegation does not read `pstack-models.md`, so panel lines such as `arena runners`, `architect runners`, `interrogate reviewers`, and `arena cross-judge pool` do not pick Herdr models. Dispatch one worker per seat the skill asks for, each with a distinct `--name` and no `--model`. The role's profile pool supplies the panel's models, and a `spread` pool spreads the seats across them. Read each worker's `profile` from its dispatch result, and say in the verdict when several seats ran on the same profile, because the panel was less diverse than the skill intends.
+Herdr delegation does not read `pstack-models.md`, so panel lines such as `arena runners`, `interrogate reviewers`, and `arena cross-judge pool` do not pick Herdr models, and neither do single-role lines such as `thermos reviewers` and `no-comments reviewer`. Dispatch one worker per seat the skill asks for, each with a distinct `--name` and no `--model`. The role's profile pool supplies the panel's models, and a `spread` pool spreads the seats across them. Read each worker's `profile` from its dispatch result, and say in the verdict when several seats ran on the same profile, because the panel was less diverse than the skill intends.
 
 For parallel fan-out, launch dispatcher processes concurrently rather than dispatching one and waiting before starting the next. Each dispatcher creates its own Herdr pane and agent. Without `--wait`, a dispatcher returns as soon as its prompt lands.
 
@@ -134,21 +136,20 @@ Most skills need only the table above. These need one more mapping:
 
 | Skill | On Herdr |
 |-------|----------|
-| `how` | Explorers and the simple explainer use `--role explorer --readonly`. The complex synthesizer uses `--role judgment --readonly`. |
-| `why` | Investigators use `--role explorer --readonly`. The synthesizer uses `--role judgment --readonly`. Do not skip `--readonly` to preserve MCP; the flag does not use Ask mode. |
+| `how` | The one explainer uses `--role explorer --readonly --wait`. |
 | `interrogate` | Adversaries run arena's Phase A and B steps but use `--role reviewer`, not `arena-candidate`, with no `--model` (see Model panels). They run without `--readonly`, each with its own worktree as `--cwd`, because they write repros there. |
 | `arena` | Candidates use `--role arena-candidate` with an isolated `--cwd`. The judge uses `--role arena-judge --readonly`. Routing does not check the judge's family, so name the judge's profile and model, from the dispatch result, in the synthesis note, and say when it shares the coordinator's family. |
 | `swarm` | Writers use `--role implementation`. Read-only workers use `--role explorer --readonly` or `--role verifier --readonly`. |
-| `reflect` | Reviewers use `--role reviewer --readonly`. The synthesizer uses `--role judgment --readonly`. |
 | `automate-me` | Transcript-mining workers use `--role explorer --readonly`; launch slices concurrently and collect only their structured findings. |
 | `maintain-verification-skill` | Source-wave workers use `--role explorer --readonly`, one per feature, launched concurrently. The coordinator still owns all live app driving. |
-| `show-me-your-work` | The cross-model audit uses `--role reviewer --readonly`. When the skill requires a different model family, deliberately choose a suitable configured profile or `--model` override instead of relying on `spread`. |
+| `show-me-your-work` | The cross-model audit uses `--role reviewer --readonly`, on another family as the Tool actions table describes, not by relying on `spread`. |
 | `recall` | Transcript-slice workers use `--role explorer --readonly`, launched concurrently. Keep raw transcript reads inside the workers and return only the requested summaries. |
 | `no-comments` | Use `--role reviewer --readonly`. Build the worker brief from `poteto-mode/references/agents/comment-sicko.md` plus the requested scope; Herdr has no Claude `subagent_type`, so do not silently drop that reviewer contract. |
 | `thermos` | Both reviewers use `--role reviewer --readonly`, launched concurrently without `--wait` and collected with `--next`. Build each brief from `poteto-mode/references/agents/thermo-nuclear-review-subagent.md` or `poteto-mode/references/agents/thermo-nuclear-code-quality-review-subagent.md` plus the same scoped diff and file contents; Herdr has no Claude `subagent_type`, so do not silently drop either reviewer contract. A read-only worker cannot write the code-quality report files, so tell that reviewer to return the summary and each detail report in its output, then write them to `/tmp/<project>-thermo/` yourself. |
 | Feature / bug-fix / refactoring / perf-issue / hillclimb | Implementation delegates use `--role implementation`, or `difficult-implementation` for concurrency, algorithms, or cross-cutting work, with an exclusive writer `--cwd`. |
+| A second opinion, a `judgment and prose` step, or the `strongest judgment` exception | `--role judgment`, with `--readonly` when the worker writes nothing. Route the role to the strongest profile; poteto-mode's rule on when `strongest judgment` may run still applies. |
 | Eval | Candidates use `--role arena-candidate` in sanitized directories. The judge uses `--role arena-judge --readonly`. |
-| Orchestrate / autopilot | Owners that must themselves delegate use `--role subcoordinator`. Direct writers use `--role implementation`. Verifiers use `--role verifier --readonly`. |
+| Autopilot / a `figure-it-out` program | Owners that must themselves delegate use `--role subcoordinator`. Direct writers use `--role implementation`. Verifiers use `--role verifier --readonly`. |
 | Autonomous run | The watcher uses `--role explorer` without `--wait`, collected with `--next`. |
 
 ## Native fallback
