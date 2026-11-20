@@ -1,6 +1,6 @@
 # Herdr execution mapping
 
-When `HERDR_ENV=1` or `HC_TERMINAL_ID` is set, pstack delegation uses the executable `scripts/herdr/dispatch.ts`. Do not use Claude Code `Agent`/`Task` or Codex `spawn_agent` for a delegation that this dispatcher can represent.
+When `HERDR_ENV=1` or `HC_TERMINAL_ID` is set, pstack delegation uses the executable `scripts/herdr/dispatch.ts`. Do not use Claude Code `Agent`/`Task`, Codex `spawn_agent`, or another runtime's subagent tool (see **Coordinators on other runtimes**) for a delegation that this dispatcher can represent.
 
 This is a structural runtime rule, not a session-start hint. Skills and playbooks keep their native spawn language. This file is the translation, the same way `codex-tools.md` is the Codex translation.
 
@@ -28,7 +28,29 @@ In the Herdr app:
 
 ## The Agent gate
 
-A `PreToolUse` hook on `Agent` (`herdr-agent-gate.sh` under the plugin hooks directory) enforces this mapping on Claude Code. With `HERDR_ENV=1`, and `herdr` and `bun` both found (`bun` on PATH or at `~/.bun/bin/bun`), it denies the call and returns the dispatcher command. In a Herdr app terminal (`HC_TERMINAL_ID`) it needs `bun` and `HC_TERMINAL_SOCKET` instead of `herdr`. If one is missing it allows the call and says which. Outside Herdr it is silent. `PSTACK_HERDR_ALLOW_NATIVE_AGENT=1` bypasses it for a delegation the dispatcher cannot represent.
+A `PreToolUse` hook on `Agent` (`herdr-agent-gate.sh` under the plugin hooks directory) enforces this mapping on Claude Code. With `HERDR_ENV=1`, and `herdr` and `bun` both found (`bun` on PATH or at `~/.bun/bin/bun`), it denies the call and returns the dispatcher command. In a Herdr app terminal (`HC_TERMINAL_ID`) it needs `bun` and `HC_TERMINAL_SOCKET` instead of `herdr`. If one is missing it allows the call and says which. Outside Herdr it is silent. MiniMax Code loads the same hooks file through its Claude Code reader, and the gate recognizes it by `MINIMAX_PLUGIN_ROOT` and stays silent there too. `PSTACK_HERDR_ALLOW_NATIVE_AGENT=1` bypasses it for a delegation the dispatcher cannot represent.
+
+## Coordinators on other runtimes
+
+poteto-mode's Platform Adaptation sentence points every runtime here inside Herdr. The dispatcher starts Claude Code and Codex workers from any coordinator that can run `bun`, but Herdr delegation is verified only from Claude Code and Codex coordinators, and only Claude Code has the Agent gate. On another runtime, the native call this mapping replaces is that runtime's subagent tool:
+
+| Runtime | Native subagent call |
+|---------|----------------------|
+| Pi | `agent` |
+| GitHub Copilot | `task` |
+| Muse | `subagent_spawn`, or a Workflow child |
+| MiniMax Code | `task` |
+| Antigravity | `invoke_subagent` |
+| OMP | `task` |
+| Kimi Code CLI | `Agent` |
+| Grok Build | `spawn_subagent` |
+| OpenCode 2 | `subagent` |
+
+From those runtimes:
+
+- Route every role in `routes.yaml`, or pass `--kind`. Without a route, the dispatcher infers the worker's CLI from the coordinator, which it can do only for Claude Code and Codex.
+- Run `--next` in the foreground unless the runtime has a background shell command whose exit wakes the agent. Never sleep and re-check.
+- When a dispatch fails for a reason the runtime causes, such as a sandbox that blocks the Herdr socket or no `bun`, say so and use that runtime's own mapping for the delegation instead of retrying.
 
 ## Tool actions
 
@@ -66,9 +88,35 @@ When you do pass `--model`, pass the model name only. Strip an `@<level>` suffix
 
 ### Model panels
 
-Herdr delegation does not read `pstack-models.md`, so panel lines such as `arena runners`, `architect runners`, `interrogate reviewers`, and `arena cross-judge pool` do not pick Herdr models. Dispatch one worker per seat the skill asks for, each with a distinct `--name` and no `--model`. The role's profile pool supplies the panel's models, and a `spread` pool spreads the seats across them. Read each worker's `profile` from its dispatch result, and say in the verdict when several seats ran on the same profile, because the panel was less diverse than the skill intends.
+Herdr delegation does not read `pstack-models.md`, a user or project sheet, so no role line in it picks a Herdr model (see **Sheet lines**). That covers panel lines such as `arena runners`, `architect runners`, `interrogate reviewers`, and `arena cross-judge pool`. Dispatch one worker per seat the skill asks for, each with a distinct `--name` and no `--model`. The role's profile pool supplies the panel's models, and a `spread` pool spreads the seats across them. Read each worker's `profile` from its dispatch result, and say in the verdict when several seats ran on the same profile, because the panel was less diverse than the skill intends.
 
 For parallel fan-out, launch dispatcher processes concurrently rather than dispatching one and waiting before starting the next. Each dispatcher creates its own Herdr pane and agent. Without `--wait`, a dispatcher returns as soon as its prompt lands.
+
+### Sheet lines
+
+Every role line a `pstack-models.md` sheet can hold, and the Herdr role that does the same work. The line itself never reaches Herdr; the role's profile pool picks the model.
+
+| Sheet line | Herdr role |
+|------------|------------|
+| `feature, refactoring` | `implementation`, or `difficult-implementation` for concurrency, algorithms, or cross-cutting work |
+| `bug-fix` | `implementation` for the fix delegate; `difficult-implementation` for the focused-fix delegate |
+| `perf-issue` | `implementation`, or `difficult-implementation` |
+| `hillclimb` | `implementation`, or `difficult-implementation` |
+| `judgment and prose` | `judgment` |
+| `strongest judgment` | `judgment` |
+| `how explorer` | `explorer --readonly` |
+| `how explainer` | `explorer --readonly` for the simple explainer; `judgment --readonly` for the complex synthesizer |
+| `why investigators` | `explorer --readonly` |
+| `why synthesizer` | `judgment --readonly` |
+| `reflect tooling` | `reviewer --readonly` |
+| `reflect judgment, divergent, synthesizer` | `reviewer --readonly`; `judgment --readonly` for the synthesizer |
+| `arena runners` | `arena-candidate` |
+| `arena cross-judge pool` | `arena-judge --readonly` |
+| `swarm workers` | `implementation` for writers; `explorer --readonly` or `verifier --readonly` for read-only workers |
+| `architect runners` | `arena-candidate` |
+| `interrogate reviewers` | `reviewer` |
+| `thermos reviewers` | `reviewer --readonly` |
+| `no-comments reviewer` | `reviewer --readonly` |
 
 ## Collecting background workers
 
@@ -130,10 +178,11 @@ The dispatcher refuses to run outside Herdr (neither `HERDR_ENV=1` nor `HC_TERMI
 
 ## Per-skill notes
 
-Most skills need only the table above. These need one more mapping:
+Most skills need only the table above. These need one more mapping. The generator stamps the Herdr pointer on every skill this table names, so a skill that delegates gets a row here.
 
 | Skill | On Herdr |
 |-------|----------|
+| `architect` | The runner panel goes through the **arena** skill: one `--role arena-candidate` worker per runner with an isolated `--cwd` and no `--model` (see Model panels). The `architect runners` sheet line does not apply. |
 | `how` | Explorers and the simple explainer use `--role explorer --readonly`. The complex synthesizer uses `--role judgment --readonly`. |
 | `why` | Investigators use `--role explorer --readonly`. The synthesizer uses `--role judgment --readonly`. Do not skip `--readonly` to preserve MCP; the flag does not use Ask mode. |
 | `interrogate` | Adversaries run arena's Phase A and B steps but use `--role reviewer`, not `arena-candidate`, with no `--model` (see Model panels). They run without `--readonly`, each with its own worktree as `--cwd`, because they write repros there. |
@@ -144,12 +193,23 @@ Most skills need only the table above. These need one more mapping:
 | `maintain-verification-skill` | Source-wave workers use `--role explorer --readonly`, one per feature, launched concurrently. The coordinator still owns all live app driving. |
 | `show-me-your-work` | The cross-model audit uses `--role reviewer --readonly`. When the skill requires a different model family, deliberately choose a suitable configured profile or `--model` override instead of relying on `spread`. |
 | `recall` | Transcript-slice workers use `--role explorer --readonly`, launched concurrently. Keep raw transcript reads inside the workers and return only the requested summaries. |
-| `no-comments` | Use `--role reviewer --readonly`. Build the worker brief from `poteto-mode/references/agents/comment-sicko.md` plus the requested scope; Herdr has no Claude `subagent_type`, so do not silently drop that reviewer contract. |
-| `thermos` | Both reviewers use `--role reviewer --readonly`, launched concurrently without `--wait` and collected with `--next`. Build each brief from `poteto-mode/references/agents/thermo-nuclear-review-subagent.md` or `poteto-mode/references/agents/thermo-nuclear-code-quality-review-subagent.md` plus the same scoped diff and file contents; Herdr has no Claude `subagent_type`, so do not silently drop either reviewer contract. A read-only worker cannot write the code-quality report files, so tell that reviewer to return the summary and each detail report in its output, then write them to `/tmp/<project>-thermo/` yourself. |
-| Feature / bug-fix / refactoring / perf-issue / hillclimb | Implementation delegates use `--role implementation`, or `difficult-implementation` for concurrency, algorithms, or cross-cutting work, with an exclusive writer `--cwd`. |
-| Eval | Candidates use `--role arena-candidate` in sanitized directories. The judge uses `--role arena-judge --readonly`. |
-| Orchestrate / autopilot | Owners that must themselves delegate use `--role subcoordinator`. Direct writers use `--role implementation`. Verifiers use `--role verifier --readonly`. |
-| Autonomous run | The watcher uses `--role explorer` without `--wait`, collected with `--next`. |
+| `no-comments` | Use `--role reviewer --readonly`; the `no-comments reviewer` sheet line does not apply. Build the worker brief from `poteto-mode/references/agents/comment-sicko.md` plus the requested scope; Herdr has no Claude `subagent_type`, so do not silently drop that reviewer contract. |
+| `thermos` | Both reviewers use `--role reviewer --readonly`; the `thermos reviewers` sheet line does not apply. They are launched concurrently without `--wait` and collected with `--next`. Build each brief from `poteto-mode/references/agents/thermo-nuclear-review-subagent.md` or `poteto-mode/references/agents/thermo-nuclear-code-quality-review-subagent.md` plus the same scoped diff and file contents; Herdr has no Claude `subagent_type`, so do not silently drop either reviewer contract. A read-only worker cannot write the code-quality report files, so tell that reviewer to return the summary and each detail report in its output, then write them to `/tmp/<project>-thermo/` yourself. |
+
+## Playbook notes
+
+Playbooks inherit this mapping from poteto-mode. These need one more mapping:
+
+| Playbook | On Herdr |
+|----------|----------|
+| [feature](../playbooks/feature.md), [bug-fix](../playbooks/bug-fix.md), [refactoring](../playbooks/refactoring.md), [perf-issue](../playbooks/perf-issue.md), [hillclimb](../playbooks/hillclimb.md) | Implementation delegates use `--role implementation`, or `difficult-implementation` for concurrency, algorithms, or cross-cutting work, with an exclusive writer `--cwd`. Bug fix's focused-fix delegate judges whether the evidence pins the cause and then implements, and natively it runs on the stronger `bug-fix` model rather than the worker model. So it uses `--role difficult-implementation` without `--readonly`. |
+| [eval](../playbooks/eval.md) | Candidates use `--role arena-candidate` in sanitized directories. The judge uses `--role arena-judge --readonly`. |
+| [orchestrate](../playbooks/orchestrate.md), [autopilot-full](../playbooks/autopilot-full.md), [autopilot-stack](../playbooks/autopilot-stack.md) | Owners that must themselves delegate use `--role subcoordinator`. Direct writers use `--role implementation`. Verifiers use `--role verifier --readonly`. Orchestrate wants each PR's verifier on a different model family from its author, and routing does not check family. So dispatch the verifier with `--kind` set to the other CLI from the author's, where `claude` and `codex` are the two families and the author's `kind` is in its dispatch result. When the `verifier` pool has no profile of that CLI, `--kind` fails before a pane opens. Then pass `--profile` naming a profile of the other CLI, or tell the user the routes cannot supply a cross-family verifier and do not merge on a same-family verdict. Name both profiles in the verdict. Orchestrate's background workers start without `--wait` and are drained with `--next`. Its three levels (coordinator, sub-coordinators, workers) fit the default `max_depth` of 3. Work that needs a worker's built state gets a fresh dispatch with that worker's worktree as `--cwd`. Stop a stalled worker as **Result handling** says, then dispatch its replacement. |
+| [autonomous-run](../playbooks/autonomous-run.md) | The watcher uses `--role explorer` without `--wait`, collected with `--next`. |
+| [multi-phase-plan](../playbooks/multi-phase-plan.md) | Exploration subagents use `--role explorer --readonly`. |
+| [runtime-forensics](../playbooks/runtime-forensics.md), [trace-forensics](../playbooks/trace-forensics.md), [session-pickup](../playbooks/session-pickup.md), [worktree-cleanup](../playbooks/worktree-cleanup.md) | Artifact and transcript parsers use `--role explorer --readonly`, launched concurrently and collected with `--next`. Keep only their reduced findings in the coordinator. |
+| [shipping](../playbooks/shipping.md) | Each PR's verifier uses `--role verifier` with that PR's worktree as `--cwd`, and `--readonly` unless running the change must write build output. |
+| [pause-safely](../playbooks/pause-safely.md) | Cancelling nested subagents means ending their workers: `herdr pane close <pane>` in the TUI, or `hc kill <name>` then `hc rm <name>` in the app. Collect a worker that may hold finished work with `--collect` instead. |
 
 ## Native fallback
 

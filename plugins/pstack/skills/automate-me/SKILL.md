@@ -11,7 +11,9 @@ On GitHub Copilot, read the [platform mapping](../poteto-mode/references/copilot
 
 On Muse, read the [platform mapping](../poteto-mode/references/muse-tools.md), including its per-skill notes, before following this skill.
 
-On Herdr, read the [Herdr execution mapping](../poteto-mode/references/herdr-tools.md), including its per-skill notes, before following this skill.
+On Antigravity, read the [platform mapping](../poteto-mode/references/agy-tools.md), including its per-skill notes, before following this skill.
+
+When `HERDR_ENV=1` or `HC_TERMINAL_ID` is set, read the [Herdr execution mapping](../poteto-mode/references/herdr-tools.md), including its per-skill notes, before the first delegation.
 
 A guided flow for turning the user's working conventions into a skill agents will follow. The output is one `-mode` skill tailored to them (e.g. `jay-mode`, `priya-mode`).
 

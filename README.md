@@ -2,7 +2,7 @@
 
 [pstack](https://github.com/cursor/plugins/tree/main/pstack) for Claude Code and Codex, with delegated agents running as visible [Herdr](https://github.com/herdrdev/herdr) panes.
 
-This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the Claude Code, Codex, Pi, GitHub Copilot, and Muse port of Lauren Tan's pstack. It has 67 Agent Skills: 43 public skills and 24 `principle-*` leaves. The skill tree is synced against upstream `ab1f702` from `cursor/plugins/pstack`.
+This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the multi-runtime port of Lauren Tan's pstack for Claude Code, Codex, Pi, GitHub Copilot, Muse, and more. It has 67 Agent Skills: 43 public skills and 24 `principle-*` leaves. The skill tree is synced against upstream `c742dd6` from `cursor/plugins/pstack`.
 
 Inside Herdr, whether the Herdr app (`HC_TERMINAL_ID`) or the Herdr TUI (`HERDR_ENV=1`), workflows that delegate start real Claude Code or Codex workers as Herdr tabs or panes, routed by role. You can watch and answer each worker. Outside Herdr, the plugin behaves like pstack-claude.
 
@@ -32,9 +32,11 @@ codex plugin marketplace add TiewKH/pstack-herdr
 codex plugin add pstack@pstack-claude
 ```
 
+Invoke a skill by typing `$` and its name, such as `$poteto-mode` or `$babysit`, then choosing its entry, which inserts `$pstack:<name>`. `/skills` lists every skill.
+
 ### Pi
 
-Run in your terminal:
+Run in your terminal, with Pi 1.5.1 or later:
 
 ```shell
 pi install git:github.com/TiewKH/pstack-herdr
@@ -68,9 +70,97 @@ muse plugins approve pstack
 
 The first command installs the native Muse plugin bundle. The second approves its `SessionStart` hook and agent definitions, which Muse runs only after approval. Start a new session afterwards. Invoke a skill with `/<name>` (for example `/poteto-mode`), which Muse lists for each user-invocable skill. Herdr delegation is verified from Claude Code and Codex coordinators only.
 
+### OMP
+
+Run in your terminal:
+
+```shell
+omp plugin marketplace add TiewKH/pstack-herdr
+omp plugin install --scope user pstack@pstack-claude
+```
+
+Restart OMP after installing, disabling, or uninstalling pstack. OMP 18.16.0 shares one plugin cache across scopes, so an upgrade or removal can affect other installations; inspect their source and scope before changing them. See [OMP issue 16827](https://github.com/can1357/oh-my-pi/issues/16827).
+
+Herdr delegation is verified from Claude Code and Codex coordinators only.
+
+### Kimi Code CLI
+
+After a release containing `kimi.plugin.json` is published, close other Kimi sessions and install it in a fresh Kimi Code CLI session:
+
+```text
+/plugins install https://github.com/TiewKH/pstack-herdr
+/reload
+```
+
+To test an unreleased checkout, use `/plugins install /absolute/path/to/pstack-herdr` instead, followed by `/reload`; Kimi copies the whole checkout, including Git metadata and local files, so use a clean, reviewed copy. To update, close other Kimi sessions, reinstall from the same source in a fresh session, and run `/reload`. Invoke a skill as `/skill:pstack:poteto-mode`; see the [Kimi mapping](plugins/pstack/skills/poteto-mode/references/kimi-tools.md) for tool guidance.
+
+Herdr delegation is verified from Claude Code and Codex coordinators only.
+
+### Grok Build
+
+```shell
+git clone https://github.com/TiewKH/pstack-herdr
+cd pstack-herdr
+grok plugin install "$PWD/plugins/pstack" --trust
+grok plugin enable pstack
+```
+
+Start a new session and use `/poteto-mode` to load the skill explicitly. To update a local install, quit Grok sessions, inspect `grok plugin details pstack` and back up any edits in the installed copy, pull the checkout, run `grok plugin uninstall pstack --keep-data`, and repeat the last two commands. If pstack was disabled, disable it again before restarting. `grok plugin update` does not refresh a local install.
+
+Herdr delegation is verified from Claude Code and Codex coordinators only.
+
+### MiniMax Code
+
+For a first install, check that `${MINIMAX_DATA_DIR:-$HOME/.minimax}/plugins/pstack` does not already exist. Then run in your terminal:
+
+```shell
+git clone https://github.com/TiewKH/pstack-herdr
+cd pstack-herdr
+mkdir -p "${MINIMAX_DATA_DIR:-$HOME/.minimax}/plugins"
+cp -R plugins/pstack "${MINIMAX_DATA_DIR:-$HOME/.minimax}/plugins/pstack"
+```
+
+MiniMax Code loads each directory under `plugins/` in its data directory as a local plugin, and reads pstack through its Claude Code reader with the skills, agents, and routing hook. `mcode plugin list` shows it as `pstack@local`. To update, record its enabled state, quit every `mcode` process, and move `plugins/pstack` to an unused path outside `plugins/`. Run `git pull` and the `cp` line again. Check `mcode plugin list` and restore the previous enabled state if needed.
+
+Herdr delegation is verified from Claude Code and Codex coordinators only.
+
+### OpenCode 2
+
+Clone the repository, then add the absolute path to `plugins/pstack/opencode` to the existing `plugins` array in `~/.config/opencode/opencode.jsonc`. On Windows, use a path such as `C:/Users/name/pstack-herdr/plugins/pstack/opencode`. Restart OpenCode after checkout updates.
+
+Alternatively, install, check, or update the native Git package:
+
+```bash
+opencode plugin add 'github:TiewKH/pstack-herdr#main'
+opencode plugin check 'github:TiewKH/pstack-herdr#main'
+opencode plugin update 'github:TiewKH/pstack-herdr#main'
+```
+
+A commit-pinned reference does not advance. If a check immediately after installation reports no package plugins, wait for the server to load it and check again.
+
+If you previously installed pstack skills into `~/.agents/skills`, inspect the links and remove only those pointing to your pstack checkout before using the plugin.
+
+The plugin registers `pstack-` skill IDs and adds routing in root sessions. If routing is missing, run `opencode api get /api/skill` and check that each `pstack-` path belongs to this plugin. Resolve any conflicting skill before manually invoking that ID. Use `session hook: off` in the OpenCode model sheet to disable routing. To remove the plugin, remove its configured path and restart the service, or use `opencode plugin remove` with the exact Git specifier. OpenCode 1 is unsupported. See the [OpenCode mapping](plugins/pstack/skills/poteto-mode/references/opencode-tools.md).
+
+Herdr delegation is verified from Claude Code and Codex coordinators only.
+
+### Antigravity (agy)
+
+Run in your terminal:
+
+```shell
+git clone https://github.com/TiewKH/pstack-herdr
+cd pstack-herdr
+agy plugin install ./plugins/pstack
+```
+
+This installs the native Antigravity plugin bundle (`skills`, `agents`, and `SessionStart` routing hook) into `~/.gemini/config/plugins/pstack`.
+
+Herdr delegation is verified from Claude Code and Codex coordinators only.
+
 ### Other harnesses
 
-OpenCode (the CLI and the desktop app), Gemini CLI, Prime Agent, and skills-only Codex installs read skills from `~/.agents/skills/`. Run in your terminal:
+Gemini CLI, Prime Agent, and skills-only Codex installs read skills from `~/.agents/skills/`. Run in your terminal:
 
 ```shell
 git clone https://github.com/TiewKH/pstack-herdr
@@ -86,9 +176,9 @@ To update, run `git pull` in the clone, then run the `for` loop again to link sk
 
 ### Configure
 
-pstack routes tasks to `poteto-mode` automatically. At session start, a hook injects an instruction that points the agent at it: the plugin's hook on Claude Code, Codex, GitHub Copilot, and Muse, and the pstack extension on Pi. Codex runs the hook only after you trust it through `/hooks`, and Muse only after `muse plugins approve pstack`. Other harnesses have no hook.
+pstack provides automatic routing on Claude Code, Codex, GitHub Copilot, Muse, MiniMax Code, Antigravity, Pi, Kimi Code CLI, OMP, and OpenCode 2. The runtimes deliver the instruction at different points: Kimi adds it while the plugin is enabled, OMP adds it before each main-agent turn, and OpenCode adds it at each model step in root sessions. Grok Build exposes a routing hint through a skill description; the model may not follow it. Codex requires hook trust through `/hooks`, and Muse requires `muse plugins approve pstack`. Other harnesses have no automatic routing.
 
-Run `setup-pstack` to turn automatic routing on or off, change model defaults, or set a reasoning effort per role (`arena runners: opus @xhigh, fable @max`). In Claude Code and the Copilot CLI, use `/pstack:setup-pstack`.
+Run `setup-pstack` to turn automatic routing on or off, change model defaults, or set a reasoning effort per role (`arena runners: opus @xhigh, fable @max`). In Claude Code and the Copilot CLI, use `/pstack:setup-pstack`. On OMP, the session hook setting applies globally across profiles; on Kimi, enable or disable the plugin to control routing. See the [routing reference](docs/reference.md#automatic-routing).
 
 ## Use it with Herdr
 
@@ -101,6 +191,10 @@ Use poteto-mode to fix the search filter resetting when I change pages.
 ```
 
 `poteto-mode` picks the playbook. For a bug, it reproduces the failure, investigates with `how` and `why`, delegates the fix to an `implementation` worker, and reruns the failing case.
+
+A localized bug with a demonstrated cause can use the [focused-fix exception](plugins/pstack/skills/poteto-mode/playbooks/bug-fix.md#focused-fix-exception). One delegate investigates and implements the correction when it preserves existing interfaces and state semantics and has a focused regression check. Reproduction, verification, and required independent review still apply; a small patch alone does not qualify.
+
+[Other playbooks](plugins/pstack/skills/poteto-mode/SKILL.md#playbooks) cover planning, features, refactoring, performance issues, investigations, prototypes, PR maintenance, shipping, and longer projects.
 
 ## How delegation works
 
@@ -125,6 +219,10 @@ Skills keep Claude's Agent vocabulary. [`herdr-tools.md`](plugins/pstack/skills/
 ## Data handling
 
 pstack has no server or telemetry. Anything its skills ask your agent to read, including session transcripts, goes to your model provider. Scripts run locally, and PR tools use your GitHub CLI login. Herdr workers run as local Claude Code or Codex processes under the profiles you configure.
+
+This port has no automatic agent-diary reporting or diary opt-in setting. For a local decision trail, ask for [`show-me-your-work`](plugins/pstack/skills/show-me-your-work/SKILL.md). Longer or unattended workflows also invoke it. The trail stays uncommitted by default. If the trail is committed and pushed to a shared PR, anyone with access to the PR can read it.
+
+To share feedback, submit a short, manually reviewed report through [GitHub issues](https://github.com/TiewKH/pstack-herdr/issues). Include the pstack version, runtime, relevant workflow, and observed result. Remove credentials, customer data, private repository links, and sensitive log or configuration values before posting; share a summary instead of raw transcripts.
 
 ## Attribution
 

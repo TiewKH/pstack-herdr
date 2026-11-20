@@ -84,7 +84,7 @@ A dispatch or `--collect` stopped by SIGTERM, SIGINT, or SIGHUP kills and remove
 
 ## The Agent gate
 
-On Claude Code, a `PreToolUse` hook on `Agent` ([`herdr-agent-gate.sh`](plugins/pstack/hooks/herdr-agent-gate.sh)) denies native subagent calls while `HERDR_ENV=1` and both `herdr` and `bun` are available, or in a Herdr app terminal (`HC_TERMINAL_ID`) with `bun` and `HC_TERMINAL_SOCKET`, and returns the dispatcher command. When one is missing, it allows the call and names it. Outside Herdr it does nothing. `PSTACK_HERDR_ALLOW_NATIVE_AGENT=1` bypasses it.
+On Claude Code, a `PreToolUse` hook on `Agent` ([`herdr-agent-gate.sh`](plugins/pstack/hooks/herdr-agent-gate.sh)) denies native subagent calls while `HERDR_ENV=1` and both `herdr` and `bun` are available, or in a Herdr app terminal (`HC_TERMINAL_ID`) with `bun` and `HC_TERMINAL_SOCKET`, and returns the dispatcher command. When one is missing, it allows the call and names it. Outside Herdr it does nothing, and it does nothing in MiniMax Code (`MINIMAX_PLUGIN_ROOT`), which loads the same hooks file through its Claude Code reader. `PSTACK_HERDR_ALLOW_NATIVE_AGENT=1` bypasses it.
 
 ## Delegation paths on Herdr
 
@@ -95,7 +95,12 @@ These workflows delegate through the dispatcher:
 - Automate me, Recall, No comments, Show me your work, Maintain verification skill.
 - Orchestrate, Autopilot-full, Autopilot-stack.
 
-Figure-it-out reaches Herdr through poteto-mode and the playbook it designs. `tests/herdr-runtime.test.mjs` fails when a skill that mentions spawning, subagents, workers, or fan-out neither points at `herdr-tools.md` nor has a `noHerdrPointer` reason in the test, when such a reason goes stale, and when a skill or playbook grows its own Herdr branch.
+Figure-it-out reaches Herdr through poteto-mode and the playbook it designs. The Herdr pointer on each skill is generated: [`tools/herdr.mjs`](tools/herdr.mjs) stamps it on every skill that `herdr-tools.md`'s Per-skill notes table names, after the runtime pointers. `tests/herdr-runtime.test.mjs` enforces the coverage:
+
+- It fails when a skill that mentions spawning, subagents, workers, or fan-out has no pointer and no `noHerdrPointer` reason in the test.
+- It fails when a delegating playbook has no Playbook notes row and no `noHerdrPlaybookRow` reason.
+- It fails when a `models.json` role line has no Sheet lines row.
+- It fails when any such reason goes stale, or when a skill or playbook grows its own Herdr branch.
 
 Panels such as arena runners and interrogate reviewers take their models from the role's profile pool, not from `pstack-models.md`. Dispatch one worker per seat with no `--model`, and `spread` spreads the seats across the pool.
 

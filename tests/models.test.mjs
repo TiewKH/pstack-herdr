@@ -9,6 +9,8 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadModels, parseModels, regions } from "../tools/generate.mjs";
+import { code } from "../tools/plugin.mjs";
+import { RUNTIMES } from "../tools/runtimes.mjs";
 import { markdownFiles } from "../tools/validate-skills.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -48,6 +50,13 @@ describe("committed models.json", () => {
     for (const [, id] of raw.herdr.codex) expect(id).toMatch(/^gpt-\d/);
   });
 
+  // Upstream bumps a model in the Pi and Codex tables; the Herdr menus must offer it too.
+  test("Herdr worker menus offer every model the Pi tables map to", () => {
+    const offered = new Set([...raw.herdr.claude, ...raw.herdr.codex].map(([, id]) => id));
+    const mapped = Object.values(raw.pi.models).flatMap((table) => Object.values(table).map((id) => id.split("/")[1]));
+    for (const id of mapped) expect(offered.has(id), `${id} is in the Pi tables but not the Herdr menu`).toBe(true);
+  });
+
   test("setup-pstack lists the Herdr worker IDs by label and ID", () => {
     const text = readFileSync(join(skillsDir, "setup-pstack/SKILL.md"), "utf8");
     expect(text).toContain("- Herdr Claude worker IDs: Opus 5.5 (`claude-opus-5-5`), ");
@@ -72,6 +81,21 @@ describe("parseModels", () => {
     expect(arena.models).toEqual(raw.tiers.panel);
     expect(role(resolved, "feature, refactoring").models).toEqual([raw.tiers.worker]);
     expect(role(resolved, "strongest judgment").models).toEqual([raw.tiers.strongest]);
+  });
+
+  test("a null or non-object root fails naming models.json instead of a bare TypeError", () => {
+    expect(() => parseModels(null, anySkill)).toThrow("models.json: must be an object");
+    expect(() => parseModels(undefined, anySkill)).toThrow("models.json: must be an object");
+    expect(() => parseModels([], anySkill)).toThrow("models.json: must be an object");
+    expect(() => parseModels("x", anySkill)).toThrow("models.json: must be an object");
+  });
+
+  test("a null or non-object role fails naming the entry instead of a bare TypeError", () => {
+    expect(parse((p) => (p.roles = [null]))).toThrow("models.json: roles[0] must be an object");
+    expect(parse((p) => (p.roles = [undefined]))).toThrow("models.json: roles[0] must be an object");
+    expect(parse((p) => (p.roles = ["x"]))).toThrow("models.json: roles[0] must be an object");
+    expect(parse((p) => (p.roles = [[]]))).toThrow("models.json: roles[0] must be an object");
+    expect(parse((p) => p.roles.splice(1, 0, null))).toThrow("models.json: roles[1] must be an object");
   });
 
   test("a missing top-level key throws naming it", () => {
@@ -204,4 +228,26 @@ describe("role labels reach the prose", () => {
       expect(normalize(skillProse(role.skill))).toContain(needle);
     });
   }
+});
+
+test("each runtime mapping names exactly the skills with a panel role as its diverse-model panels", () => {
+  const panelSkills = [...new Set(models.roles.filter((r) => r.tier === "panel").map((r) => r.skill))].sort();
+  const lists = markdownFiles(join(skillsDir, "poteto-mode/references")).flatMap((file) =>
+    [...readFileSync(file, "utf8").matchAll(/Diverse-model panels \(([^)]*)\)/g)].map((m) => ({
+      file: relative(repoRoot, file),
+      skills: [...m[1].matchAll(/`([^`]+)`/g)].map((s) => s[1]).sort(),
+    })),
+  );
+  expect(lists.length).toBeGreaterThan(0);
+  for (const list of lists) expect(list).toEqual({ ...list, skills: panelSkills });
+});
+
+test("moving a skill's roles off the panel tier drops it from every runtime's panel list", () => {
+  const skill = models.roles.find((r) => r.tier === "panel").skill;
+  const moved = { ...models, roles: models.roles.map((r) => (r.skill === skill ? { ...r, tier: "default" } : r)) };
+  const panelLists = (m) => RUNTIMES.map((runtime) => runtime.modelNames(m).match(/Diverse-model panels \(([^)]*)\)/)?.[1]).filter(Boolean);
+  const before = panelLists(models);
+  expect(before.length).toBeGreaterThan(0);
+  for (const list of before) expect(list).toContain(code(skill));
+  for (const list of panelLists(moved)) expect(list).not.toContain(code(skill));
 });
