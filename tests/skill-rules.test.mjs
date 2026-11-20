@@ -12,6 +12,21 @@ const skillsDir = fileURLToPath(new URL("../plugins/pstack/skills", import.meta.
 
 const rules = [
   {
+    source: "#331 Codex session effort with an explicit model",
+    file: "poteto-mode/references/codex-tools.md",
+    phrase: "pass the final level as `reasoning_effort`",
+  },
+  {
+    source: "#331 unknown Codex session effort",
+    file: "poteto-mode/references/codex-tools.md",
+    phrase: "Do not substitute an omitted `reasoning_effort` for the missing starting level.",
+  },
+  {
+    source: "#331 resolve active Codex effort before dispatch",
+    file: "poteto-mode/references/codex-tools.md",
+    phrase: "run `node <poteto-mode-dir>/scripts/codex-session-effort.mjs` before dispatching",
+  },
+  {
     source: "#71 callable driver policy",
     file: "poteto-mode/SKILL.md",
     phrase: "fall back to `run` when the repo has none",
@@ -55,6 +70,16 @@ const rules = [
     source: "#229 parallel sessions keep separate todolists",
     file: "poteto-mode/SKILL.md",
     phrase: "When several sessions share the checkout, name it `.audit/<task-slug>.todo.md`",
+  },
+  {
+    source: "#387 desktop app plan tool is named",
+    file: "poteto-mode/SKILL.md",
+    phrase: "In the Claude desktop app, `mcp__ccd_turn__update_plan` asks for items of about seven words.",
+  },
+  {
+    source: "#387 desktop app keeps the verbatim checklist",
+    file: "poteto-mode/SKILL.md",
+    phrase: "keep this checklist as well, with the playbook steps verbatim and each `skip: <reason>` line",
   },
   {
     source: "#58 stop before you re-delegate",
@@ -140,16 +165,6 @@ const rules = [
     source: "#188 a missing reviewer blocks the gate",
     file: "poteto-mode/SKILL.md",
     phrase: "Record `BLOCKED: independent review` in the todolist",
-  },
-  {
-    source: "#231 reflect digest carries no verdict",
-    file: "reflect/SKILL.md",
-    phrase: "It states no diagnosis, verdict, or cause.",
-  },
-  {
-    source: "#231 reflect adds nothing beside the transcript path",
-    file: "reflect/SKILL.md",
-    phrase: "Add nothing beside a transcript path",
   },
   {
     source: "backnotprop/pstack#14 an outside rule nobody can check is held, not deleted",

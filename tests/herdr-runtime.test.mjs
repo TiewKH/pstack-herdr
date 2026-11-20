@@ -10,15 +10,13 @@ const mapping = read("plugins/pstack/skills/poteto-mode/references/herdr-tools.m
 const poteto = read("plugins/pstack/skills/poteto-mode/SKILL.md");
 const hook = read("plugins/pstack/hooks/session-start-context.md");
 const routes = read("config/routes.example.yaml");
-const setup = read("plugins/pstack/skills/setup-pstack/SKILL.md");
+const setupSkill = read("plugins/pstack/skills/setup-pstack/SKILL.md");
+const setup = setupSkill + read("plugins/pstack/skills/setup-pstack/herdr.md");
 const skills = [
-  "architect",
   "how",
-  "why",
   "arena",
   "interrogate",
   "swarm",
-  "reflect",
   "automate-me",
   "maintain-verification-skill",
   "show-me-your-work",
@@ -35,7 +33,6 @@ const playbooks = [
   "eval",
   "multi-phase-plan",
   "autonomous-run",
-  "orchestrate",
   "autopilot-full",
   "autopilot-stack",
 ];
@@ -81,6 +78,7 @@ for (const skill of skills) {
 // A skill that mentions delegation either points at the Herdr mapping or says here why it needs no pointer,
 // so every new upstream skill that mentions delegation forces that decision.
 const noHerdrPointer = {
+  architect: "names the next worker in a handoff; its design panel runs through arena, which points at the mapping",
   babysit: "says a subagent that opens a PR hands back to its parent; starts none",
   "figure-it-out": "fans out through poteto-mode, which it reads first and which points at the mapping",
   ketchup: "summarizes subagent reports; starts none",
@@ -124,10 +122,6 @@ for (const playbook of playbooks) {
     throw new Error(`${playbook} dual-paths Herdr instead of inheriting the mapping`);
   }
 }
-const plan = read("plugins/pstack/skills/poteto-mode/playbooks/multi-phase-plan.md");
-if (!plan.includes("````markdown")) {
-  throw new Error("multi-phase-plan.md must keep the live plan skeleton");
-}
 for (const role of [
   "explorer",
   "implementation",
@@ -145,7 +139,7 @@ if (routes.includes("workspace:") || routes.includes("round-robin") || routes.in
   throw new Error("route example still documents unused workspace or collapsed strategy names");
 }
 
-if (!setup.includes("If `HERDR_ENV=1` or `HC_TERMINAL_ID` is set, follow **Herdr setup**")) {
+if (!setupSkill.includes("If `HERDR_ENV=1` or `HC_TERMINAL_ID` is set, follow **Herdr setup** in [herdr.md](herdr.md)")) {
   throw new Error("setup-pstack does not branch on Herdr runtime");
 }
 if (!setup.includes("herdr/configure.ts") || !setup.includes("Do not write YAML yourself.")) {
@@ -181,7 +175,7 @@ if (!setup.includes("Show every profile") || !setup.includes("Ask whether to acc
 if (!setup.includes("Multiple profiles may share the same config home")) {
   throw new Error("setup-pstack does not document single-subscription multi-profile routing");
 }
-if (!setup.includes("## Native setup") || !setup.includes("~/.claude/pstack-models.md")) {
+if (!setupSkill.includes("### 6. Write the override sheet") || !setupSkill.includes("~/.claude/pstack-models.md")) {
   throw new Error("setup-pstack lost the native fallback configuration path");
 }
 

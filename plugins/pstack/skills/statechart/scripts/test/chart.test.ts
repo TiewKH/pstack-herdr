@@ -16,7 +16,6 @@ import {
   EC,
   type Graph,
   hasSection,
-  key,
   type Lasso,
   LEVEL,
   type PathStep,
@@ -28,6 +27,7 @@ import {
   stateRules,
   type Step,
   type Value,
+  valueKey,
   type Vars,
   type View,
 } from "../ir.ts";
@@ -42,6 +42,7 @@ import { readTrace } from "../frontends/trace.ts";
 import { readVerdict } from "../frontends/verdict.ts";
 import { compile, project } from "../pipeline.ts";
 import { fileLines } from "../run.ts";
+import { drawn } from "./drawn.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const corpus = (name: string, file: string) => path.join(here, "corpus", name, file);
@@ -179,7 +180,7 @@ test("a label prints each value in TLA+, so values that TLC tells apart look apa
     assert.equal(shown(text), text);
 });
 
-test("equal TLA+ values share one key and unequal ones do not, as TLC compares them", () => {
+test("equal TLA+ values get the same valueKey and unequal ones do not, as TLC compares them", () => {
   const same = [
     ["1..3", "{1, 2, 3}"],
     ["1..3", "{3, 1, 2, 2}"],
@@ -194,7 +195,7 @@ test("equal TLA+ values share one key and unequal ones do not, as TLC compares t
     ["{A, B}", "{B, A}"],
     ['{"b", "a"}', '{"a", "b"}'],
   ];
-  for (const [a, b] of same) assert.equal(key(parseValue(a)), key(parseValue(b)), `${a} = ${b}`);
+  for (const [a, b] of same) assert.equal(valueKey(parseValue(a)), valueKey(parseValue(b)), `${a} = ${b}`);
   const apart = [
     ['"A"', "A"],
     ["<<0>>", '("1" :> 0)'],
@@ -211,7 +212,7 @@ test("equal TLA+ values share one key and unequal ones do not, as TLC compares t
     ["{<<1>>}", "{<<2>>}"],
   ];
   for (const [a, b] of apart)
-    assert.notEqual(key(parseValue(a)), key(parseValue(b)), `${a} # ${b}`);
+    assert.notEqual(valueKey(parseValue(a)), valueKey(parseValue(b)), `${a} # ${b}`);
 });
 
 function replay(name: string, graph: Graph) {
@@ -693,6 +694,48 @@ test("a step that leaves every child of a parent the same way is one arrow from 
   assert.deepEqual(quits, [[open, closed]]);
 });
 
+test("a parent's only way in ends at the parent, and its start marker goes on to each state with that step's label", () => {
+  const graph = graphOf(
+    [
+      ["ask", { at: "Asking" }, true],
+      ["flat", { at: "Layout.Flat" }],
+      ["parents", { at: "Layout.Parents" }],
+      ["drawn", { at: "Done.Drawn" }],
+    ],
+    [
+      ["ask", "flat", "String"],
+      ["ask", "parents", "Array"],
+      ["flat", "drawn", "Draw"],
+    ],
+  );
+  const { chart } = draw(graph, { state: (v) => String(v.at).split(".") });
+  assert.deepEqual(drawn(chart).arrows.sort(), [
+    "Asking --> Layout",
+    "Done start --> Drawn",
+    "Flat --> Done: Draw",
+    "Layout start --> Flat: String",
+    "Layout start --> Parents: Array",
+  ]);
+});
+
+test("a parent that two states lead into keeps an arrow from each, since one start marker cannot say where each came from", () => {
+  const graph = graphOf(
+    [
+      ["a", { at: "A" }, true],
+      ["b", { at: "B" }],
+      ["p", { at: "P.p" }],
+      ["q", { at: "P.q" }],
+    ],
+    [
+      ["a", "b", "Go"],
+      ["a", "p", "Left"],
+      ["b", "q", "Right"],
+    ],
+  );
+  const { chart } = draw(graph, { state: (v) => String(v.at).split(".") });
+  assert.deepEqual(drawn(chart).arrows.sort(), ["A --> B: Go", "A --> p: Left", "B --> q: Right"]);
+});
+
 test("a label codes only the characters that Mermaid reads as syntax, so TLA+ values stay as TLC prints them", () => {
   const graph = graphOf(
     [
@@ -728,7 +771,7 @@ test("a label with %% stays text and cannot open a Mermaid directive", () => {
   assert.match(chart, /^ {2}s\d+ --> s\d+: #37;% go$/m);
 });
 
-test("each line break in a label or a colors key is a space, so it cannot start a chart line", () => {
+test("each line break in a label or a colors name is a space, so it cannot start a chart line", () => {
   const graph = graphOf(
     [
       ["s0", { n: 0 }, true],
@@ -954,10 +997,10 @@ test("a view that cannot give a chart says what to change", () => {
 const keyGraph = () =>
   graphOf(
     [
-      ["idle", { pos: "idle", key: parseValue("[on |-> FALSE, at |-> 0]") }, true],
-      ["waitKeyOff", { pos: "wait", key: parseValue("[on |-> FALSE, at |-> 0]") }],
-      ["waitKeyOn", { pos: "wait", key: parseValue("[on |-> TRUE, at |-> 0]") }],
-      ["done", { pos: "done", key: parseValue("[on |-> TRUE, at |-> 0]") }],
+      ["idle", { pos: "idle", lock: parseValue("[on |-> FALSE, at |-> 0]") }, true],
+      ["waitKeyOff", { pos: "wait", lock: parseValue("[on |-> FALSE, at |-> 0]") }],
+      ["waitKeyOn", { pos: "wait", lock: parseValue("[on |-> TRUE, at |-> 0]") }],
+      ["done", { pos: "done", lock: parseValue("[on |-> TRUE, at |-> 0]") }],
     ],
     [
       ["idle", "waitKeyOff", "Go"],
@@ -970,7 +1013,7 @@ const keyGraph = () =>
 const keyState = (header: string, pos: string) => ({
   code: EC.TLC_STATE_PRINT2,
   level: LEVEL.STATE,
-  body: [header, `/\\ pos = "${pos}"`, "/\\ key = [at |-> 0, on |-> FALSE]", ""],
+  body: [header, `/\\ pos = "${pos}"`, "/\\ lock = [at |-> 0, on |-> FALSE]", ""],
 });
 const keyTrace = () =>
   readTrace([
@@ -981,7 +1024,7 @@ const keyTrace = () =>
 
 test("a loop's trace finds its states when TLC prints record fields in another order", () => {
   const graph = keyGraph();
-  const bug = lasso(graph, keyTrace(), ["pos", "key"]);
+  const bug = lasso(graph, keyTrace(), ["pos", "lock"]);
   assert.ok(bug);
   assert.equal(bug.start, "idle");
   const moves = [];
@@ -993,12 +1036,12 @@ test("a loop's trace finds its states when TLC prints record fields in another o
 
 test("a view may hide a step inside a loop, but not a step out of it", () => {
   const graph = keyGraph();
-  const found = lasso(graph, keyTrace(), ["pos", "key"]);
+  const found = lasso(graph, keyTrace(), ["pos", "lock"]);
   assert.ok(found);
   const loop: Bug = { rule: { kind: "property", name: "Opens" }, ...found };
-  const state = (v: Vars) => `${v.pos}, key ${field(v.key, "on") ? "on" : "off"}`;
+  const state = (v: Vars) => `${v.pos}, lock ${field(v.lock, "on") ? "on" : "off"}`;
   const { report } = draw(graph, { state, step: (a) => (a === "Tick" ? null : a) }, [loop]);
-  assert.match(report, /^The run stops in "wait, key off" forever\.$/m);
+  assert.match(report, /^The run stops in "wait, lock off" forever\.$/m);
   assert.throws(
     () => draw(graph, { state, step: (a) => (a === "Back" ? null : a) }, [loop]),
     /the step Back that changes pos\. It is on the path to the Opens bug or leaves its loop/,
@@ -1043,7 +1086,7 @@ test("a loop that passes one state twice names it once", () => {
 
 test("a chart that draws a way out of a loop that the loop cannot take stops the command", () => {
   const graph = keyGraph();
-  const found = lasso(graph, keyTrace(), ["pos", "key"]);
+  const found = lasso(graph, keyTrace(), ["pos", "lock"]);
   assert.ok(found);
   const loop: Bug = { rule: { kind: "property", name: "Opens" }, ...found };
   assert.throws(
@@ -1052,10 +1095,10 @@ test("a chart that draws a way out of a loop that the loop cannot take stops the
   );
   const { chart } = draw(
     graph,
-    { state: (v) => `${v.pos}, key ${field(v.key, "on") ? "on" : "off"}` },
+    { state: (v) => `${v.pos}, lock ${field(v.lock, "on") ? "on" : "off"}` },
     [loop],
   );
-  const wait = chart.match(/^ {2}(s\d+): wait, key off$/m)?.[1];
+  const wait = chart.match(/^ {2}(s\d+): wait, lock off$/m)?.[1];
   assert.match(chart, new RegExp(`^ {2}class ${wait} repeats$`, "m"));
 });
 
@@ -1167,9 +1210,9 @@ test("the chart uses the colors that checkView read once from the view's own key
     () => draw(graph, checkView({ group: () => "Busy", colors: hidden }, inspect)),
     /group\(\) returned "Busy", which colors does not name/,
   );
-  const key = Symbol("Busy");
+  const busy = Symbol("Busy");
   assert.throws(
-    () => draw(graph, checkView({ group: () => key, colors: { [key]: "breaks" } }, inspect)),
+    () => draw(graph, checkView({ group: () => busy, colors: { [busy]: "breaks" } }, inspect)),
     /group\(\) returned Symbol\(Busy\), which colors does not name/,
   );
 });
