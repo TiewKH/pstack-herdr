@@ -152,7 +152,7 @@
     },
     "plugins/pstack/skills/poteto-mode/scripts/package.json": {
       "kind": "policy",
-      "why": "Typechecks through the root tsconfig.json so the port-only modules are covered.",
+      "why": "Typechecks through the root tsconfig.json so the port-only modules are covered, and adds the port-only herdr folder to the test script so `bun run test` runs the Herdr dispatcher tests beside watch-pr's.",
       "since": "0.9.23",
       "upstream": "not-proposed"
     },

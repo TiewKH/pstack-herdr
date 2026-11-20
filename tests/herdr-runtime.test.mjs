@@ -175,7 +175,7 @@ if (!setup.includes("Show every profile") || !setup.includes("Ask whether to acc
 if (!setup.includes("Multiple profiles may share the same config home")) {
   throw new Error("setup-pstack does not document single-subscription multi-profile routing");
 }
-if (!setupSkill.includes("### 6. Write the override sheet") || !setupSkill.includes("~/.claude/pstack-models.md")) {
+if (!setupSkill.includes("### 6. Write the override sheet") || !setupSkill.includes("the user sheet is `<config>/pstack-models.md`")) {
   throw new Error("setup-pstack lost the native fallback configuration path");
 }
 
