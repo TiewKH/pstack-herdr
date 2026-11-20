@@ -11,7 +11,7 @@ On GitHub Copilot, read the [platform mapping](../poteto-mode/references/copilot
 
 On Muse, read the [platform mapping](../poteto-mode/references/muse-tools.md), including its per-skill notes, before following this skill.
 
-When `HERDR_ENV=1`, read [the Herdr execution mapping](../poteto-mode/references/herdr-tools.md) before the first delegation.
+When `HERDR_ENV=1` or `HC_TERMINAL_ID` is set, read [the Herdr execution mapping](../poteto-mode/references/herdr-tools.md) before the first delegation.
 
 Open a todolist with one entry per phase (Frame, Fan out, Cross-judge, Pick, Graft, Verify) before launching anything.
 

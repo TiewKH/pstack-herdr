@@ -40,7 +40,7 @@ const playbooks = [
   "autopilot-stack",
 ];
 
-if (hook.includes("pstack:herdr-runtime") || hook.includes("HERDR_ENV=1")) {
+if (hook.includes("pstack:herdr-runtime") || hook.includes("HERDR_ENV=1") || hook.includes("HC_TERMINAL_ID")) {
   throw new Error("session-start hook must not own Herdr delegation");
 }
 const hooks = JSON.parse(read("plugins/pstack/hooks/hooks.json")).hooks;
@@ -54,6 +54,9 @@ if (!mapping.includes("herdr-agent-gate.sh") || !mapping.includes("PSTACK_HERDR_
   throw new Error("Herdr mapping does not document the Agent gate and its bypass");
 }
 if (!mapping.includes("herdr/dispatch.ts")) throw new Error("Herdr mapping does not point to dispatcher");
+if (!mapping.includes("`HERDR_ENV=1` or `HC_TERMINAL_ID` is set") || !mapping.includes("## Runtimes")) {
+  throw new Error("Herdr mapping does not cover both the Herdr TUI and the Herdr app");
+}
 if (!mapping.includes("| `how` |") || !mapping.includes("| Feature / bug-fix")) {
   throw new Error("Herdr mapping is missing per-skill notes");
 }
@@ -69,6 +72,10 @@ for (const skill of skills) {
   const body = read(`plugins/pstack/skills/${skill}/SKILL.md`);
   if (!body.includes("herdr-tools.md")) {
     throw new Error(`${skill} does not point at the Herdr mapping`);
+  }
+  // A pointer gated on HERDR_ENV alone never fires in the Herdr app.
+  if (body.includes("When `HERDR_ENV=1`,")) {
+    throw new Error(`${skill} gates its Herdr pointer on HERDR_ENV alone; add HC_TERMINAL_ID for the Herdr app`);
   }
 }
 // A skill that mentions delegation either points at the Herdr mapping or says here why it needs no pointer,
@@ -111,7 +118,8 @@ for (const playbook of playbooks) {
     body.includes("herdr/dispatch") ||
     body.includes("Under Herdr") ||
     body.includes("Outside Herdr") ||
-    body.includes("HERDR_ENV")
+    body.includes("HERDR_ENV") ||
+    body.includes("HC_TERMINAL_ID")
   ) {
     throw new Error(`${playbook} dual-paths Herdr instead of inheriting the mapping`);
   }
@@ -137,7 +145,7 @@ if (routes.includes("workspace:") || routes.includes("round-robin") || routes.in
   throw new Error("route example still documents unused workspace or collapsed strategy names");
 }
 
-if (!setup.includes("If `HERDR_ENV=1`, follow **Herdr setup**")) {
+if (!setup.includes("If `HERDR_ENV=1` or `HC_TERMINAL_ID` is set, follow **Herdr setup**")) {
   throw new Error("setup-pstack does not branch on Herdr runtime");
 }
 if (!setup.includes("herdr/configure.ts") || !setup.includes("Do not write YAML yourself.")) {

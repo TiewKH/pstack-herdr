@@ -1,6 +1,15 @@
 # Herdr runtime
 
-When `HERDR_ENV=1`, pstack delegates through [`herdr/dispatch.ts`](plugins/pstack/skills/poteto-mode/scripts/herdr/dispatch.ts) instead of the native `Agent` tool. pstack still decides decomposition, roles, isolation, synthesis, review, and verification. The dispatcher owns the worker's pane from creation to cleanup. [`herdr-tools.md`](plugins/pstack/skills/poteto-mode/references/herdr-tools.md) is the per-skill mapping agents read. This file is the contract behind it.
+Inside Herdr, pstack delegates through [`herdr/dispatch.ts`](plugins/pstack/skills/poteto-mode/scripts/herdr/dispatch.ts) instead of the native `Agent` tool. pstack still decides decomposition, roles, isolation, synthesis, review, and verification. The dispatcher owns the worker's pane from creation to cleanup. [`herdr-tools.md`](plugins/pstack/skills/poteto-mode/references/herdr-tools.md) is the per-skill mapping agents read. This file is the contract behind it.
+
+## Runtimes
+
+The dispatcher drives either form of Herdr and picks one from the environment:
+
+- **Herdr TUI** (`herdr`): panes carry `HERDR_ENV=1`. The dispatcher calls the `herdr` binary. [Dispatch lifecycle](#dispatch-lifecycle) below describes this runtime.
+- **Herdr app** (`herdr-app`, whose terminals `herdr-core` runs): terminals carry `HC_TERMINAL_ID` and `HC_TERMINAL_SOCKET`. The dispatcher speaks herdr-core's JSON-RPC on that socket. [Herdr app lifecycle](#herdr-app-lifecycle) describes this runtime.
+
+`HERDR_ENV=1` wins when both are set, because a TUI pane started inside an app terminal is the inner runtime. Roles, routing, depth, flags, and the result JSON are shared; [`hc.ts`](plugins/pstack/skills/poteto-mode/scripts/herdr/hc.ts) holds the app backend.
 
 ## Roles
 
@@ -30,6 +39,8 @@ When `HERDR_ENV=1`, pstack delegates through [`herdr/dispatch.ts`](plugins/pstac
 
 Each worker gets `PSTACK_HERDR_DEPTH=<parent + 1>` and `PSTACK_HERDR_PARENT_KIND=<its kind>`. The dispatcher refuses to start a worker at `orchestration.max_depth`, which defaults to 3. That allows coordinator, subcoordinator, then worker.
 
+A worker that delegates reaches Herdr over a local socket, and Codex's `workspace-write` sandbox blocks that socket while its network is off. A Codex profile routed to `subcoordinator` therefore needs `network_access = true` under `[sandbox_workspace_write]` in that profile's `$CODEX_HOME/config.toml`. Without it, nested dispatch fails under both runtimes; the dispatcher appends that fix to the socket error when Codex sets `CODEX_SANDBOX_NETWORK_DISABLED=1`. `/setup-pstack` asks about the setting when it routes `subcoordinator` to Codex.
+
 The caller's `--cwd` is the isolation boundary. Read-only workers may share a checkout. Concurrent writers and arena candidates each get their own worktree.
 
 ## Dispatch lifecycle
@@ -43,7 +54,7 @@ bun <poteto-mode>/scripts/herdr/dispatch.ts \
   --wait
 ```
 
-1. The dispatcher opens a background tab, starts the CLI, and waits for it to report idle. Herdr 0.9.2+ never reports a ready Codex composer as idle, so `unknown` and `done` also end the wait for a Codex worker. Herdr 0.9.3 reads a fresh Codex composer as `done`.
+1. The dispatcher opens a background tab in the caller's workspace (`HERDR_WORKSPACE_ID`), starts the CLI, and waits for it to report idle. Herdr 0.9.2+ never reports a ready Codex composer as idle, so `unknown` and `done` also end the wait for a Codex worker. Herdr 0.9.3 reads a fresh Codex composer as `done`.
 2. It types the prompt and counts it delivered once the agent leaves idle (for Codex, once it reads `working` or `blocked`, or its rollout quotes the prompt) within `PSTACK_HERDR_DELIVERY_WINDOW_MS` (default 8000 ms). It retries once. A prompt that is rejected or never lands closes the pane and puts the worker's last screen in the error.
 3. With `--wait`, it waits up to `--timeout` (default `orchestration.default_timeout_ms`, 180000 ms). `agent start` gets at most the 300000 ms Herdr accepts.
 4. For a Claude worker, a `done` or `idle` status counts only when the session file Herdr names, written after the prompt, quotes its first line. Without one, the dispatcher closes the pane and throws. Herdr reads a CLI that booted and stalled as a finished turn.
@@ -60,9 +71,20 @@ bun <poteto-mode>/scripts/herdr/dispatch.ts --next worker-a worker-b worker-c --
 
 `--next` blocks until the first named worker settles, reads and closes every worker that has, and prints `{"settled": [...], "pending": [...]}`. Call it again with the `pending` names until none are left. Each Claude worker's status change reaches it through a Herdr `events.subscribe` stream on `HERDR_SOCKET_PATH`, so it wakes when the status changes. Reading the output and closing the pane takes under a second more. A Codex worker's rollout is read every second. Without the socket, it reads every second. `--next` only watches: a stopped `--next`, or one whose budget ends, leaves every worker open. It works the same from a Claude Code or a Codex orchestrator, so neither needs a sleep loop.
 
+## Herdr app lifecycle
+
+1. The dispatcher reads the caller's terminal (`HC_TERMINAL_ID`) for its `herdr.space` and `herdr.tab` labels.
+2. It starts one `terminal.run` with the CLI as `argv` and the brief after `--` as the launch prompt. Codex gets `--no-daemon`. The terminal is named `--name`, is a child of the caller, has `no_notify` set so herdr-core types no notes into the coordinator, and carries `pstack.kind`, `pstack.role`, `pstack.profile`, and `pstack.depth` labels. `herdr.space` is copied from the caller, so the app opens the worker as a background tab in that space; `--placement split` also copies `herdr.tab`, which puts it beside the caller. herdr-core starts programs with its own login environment, so `env` carries the caller's `PATH`, `PSTACK_HERDR_ROUTES` when set, the profile's `env`, and the depth variables. The rule that drops a profile's default config home (`~/.claude`, `~/.codex`) checks herdr-core's own environment, read once per dispatch, because that is what the worker inherits.
+3. The dispatcher labels the worker with its launch pid (`pstack.pid`). The app keeps every terminal it shows, so herdr-core replaces a lost program with a shell instead of ending the terminal. A live terminal with a `reason`, or with a pid other than the launch pid, is a lost worker and settles as `exited`.
+4. The worker settles on the CLI's own OSC 7501 status. `turn` rises each time the status leaves `working`, so a task is finished once `turn` is above zero and the status is not `working`. Codex reports `idle` while it boots, at turn 0, so that is not completion. `blocked`, `error`, and an exited program also settle.
+5. A `done`, `idle`, or `exited` worker's screen and 240 lines of history are read, then its terminal is killed and removed (`--keep-pane` keeps it). `blocked` and `error` workers stay open. A budget that ends returns `working`, or `unknown` when the worker never started its task, and leaves the terminal open for `--collect`.
+6. `--next` subscribes to herdr-core's event stream and wakes on status, turn, and exit events for its workers, reading every 10 seconds if an event is missed and every second without a subscription.
+
+A dispatch or `--collect` stopped by SIGTERM, SIGINT, or SIGHUP kills and removes its worker over the herdr-core socket, so cleanup does not need the `hc` binary on PATH, then exits with the signal's code. Workers also end when the caller's terminal program ends, because they are its children.
+
 ## The Agent gate
 
-On Claude Code, a `PreToolUse` hook on `Agent` ([`herdr-agent-gate.sh`](plugins/pstack/hooks/herdr-agent-gate.sh)) denies native subagent calls while `HERDR_ENV=1` and both `herdr` and `bun` are available, and returns the dispatcher command. When either binary is missing, it allows the call and names the missing one. Outside Herdr it does nothing. `PSTACK_HERDR_ALLOW_NATIVE_AGENT=1` bypasses it.
+On Claude Code, a `PreToolUse` hook on `Agent` ([`herdr-agent-gate.sh`](plugins/pstack/hooks/herdr-agent-gate.sh)) denies native subagent calls while `HERDR_ENV=1` and both `herdr` and `bun` are available, or in a Herdr app terminal (`HC_TERMINAL_ID`) with `bun` and `HC_TERMINAL_SOCKET`, and returns the dispatcher command. When one is missing, it allows the call and names it. Outside Herdr it does nothing. `PSTACK_HERDR_ALLOW_NATIVE_AGENT=1` bypasses it.
 
 ## Delegation paths on Herdr
 

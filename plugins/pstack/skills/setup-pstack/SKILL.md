@@ -13,7 +13,7 @@ On Muse, read the [platform mapping](../poteto-mode/references/muse-tools.md), i
 
 Choose the setup path from the runtime first:
 
-- If `HERDR_ENV=1`, follow **Herdr setup** below. Herdr-backed delegation does not read `~/.claude/pstack-models.md`; worker kind, account/config home, and model come from `~/.config/pstack-herdr/routes.yaml`.
+- If `HERDR_ENV=1` or `HC_TERMINAL_ID` is set, follow **Herdr setup** below. Herdr-backed delegation does not read `~/.claude/pstack-models.md`; worker kind, account/config home, and model come from `~/.config/pstack-herdr/routes.yaml`.
 - Otherwise follow **Native setup**. On Codex, read the [platform mapping](../poteto-mode/references/codex-tools.md), including its per-skill notes, before following the native steps.
 
 Do not configure both layers unless the user explicitly wants native fallback behavior configured too.
@@ -72,6 +72,8 @@ Collect all nine required semantic roles:
 Each role has a non-empty `profiles` array and `strategy` of `first` or `spread`.
 
 Prefer capable/cheap profiles for `explorer` and `verifier`, stronger profiles for `difficult-implementation`, `judgment`, `arena-judge`, and `subcoordinator`, and diverse pools for `reviewer` and `arena-candidate` when more than one runtime/model is available.
+
+A worker that delegates reaches Herdr over a local socket, and Codex's `workspace-write` sandbox blocks that socket while its network is off. A Codex profile routed to `subcoordinator` therefore needs `network_access = true` under `[sandbox_workspace_write]` in that profile's `$CODEX_HOME/config.toml`. The setting loosens every session that uses that Codex home, not only subcoordinators. When the user routes `subcoordinator` to a Codex profile, say so and ask whether that home has the setting. Do not edit Codex's config yourself. Offer a Claude profile for the role as the alternative. Claude Code does not sandbox its shell by default.
 
 ### 4. Write the setup input JSON
 

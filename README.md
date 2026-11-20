@@ -4,7 +4,7 @@
 
 This is a fork of [`michael-denyer/pstack-claude`](https://github.com/michael-denyer/pstack-claude), the Claude Code, Codex, Pi, GitHub Copilot, and Muse port of Lauren Tan's pstack. It has 67 Agent Skills: 43 public skills and 24 `principle-*` leaves. The skill tree is synced against upstream `ab1f702` from `cursor/plugins/pstack`.
 
-Inside Herdr (`HERDR_ENV=1`), workflows that delegate start real Claude Code or Codex workers in Herdr panes, routed by role. You can watch and answer each worker. Outside Herdr, the plugin behaves like pstack-claude.
+Inside Herdr, whether the Herdr app (`HC_TERMINAL_ID`) or the Herdr TUI (`HERDR_ENV=1`), workflows that delegate start real Claude Code or Codex workers as Herdr tabs or panes, routed by role. You can watch and answer each worker. Outside Herdr, the plugin behaves like pstack-claude.
 
 For concurrency bugs and invariants that tests cannot reach, `/create-formal-verification-skill` picks the riskiest property in your code, verifies it with a tool that fits, and leaves a project skill the next agent reruns. The separate [agent-formal-verify](https://github.com/michael-denyer/agent-formal-verify) plugin goes deeper on the method, with guided TLA+ model checking, Lean proofs, and Kani for Rust.
 
@@ -112,7 +112,7 @@ Use poteto-mode to fix the search filter resetting when I change pages.
 | Herdr | panes, agent status, visibility |
 | Claude Code, Codex | the delegated work |
 
-Skills keep Claude's Agent vocabulary. [`herdr-tools.md`](plugins/pstack/skills/poteto-mode/references/herdr-tools.md) translates it to dispatcher calls when `HERDR_ENV=1`, the same way `codex-tools.md` does for Codex. [HERDR.md](HERDR.md) is the runtime contract: roles, routing, depth limits, isolation, and the dispatcher's lifecycle.
+Skills keep Claude's Agent vocabulary. [`herdr-tools.md`](plugins/pstack/skills/poteto-mode/references/herdr-tools.md) translates it to dispatcher calls inside Herdr (`HERDR_ENV=1` or `HC_TERMINAL_ID`), the same way `codex-tools.md` does for Codex. [HERDR.md](HERDR.md) is the runtime contract: roles, routing, depth limits, isolation, and the dispatcher's lifecycle.
 
 ## More
 

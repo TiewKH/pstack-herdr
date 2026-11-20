@@ -101,3 +101,37 @@ test('inside Herdr without bun the Agent tool is allowed with a note', () => {
 test('PSTACK_HERDR_ALLOW_NATIVE_AGENT=1 bypasses the gate silently', () => {
   assert.equal(run({ HERDR_ENV: '1', PSTACK_HERDR_ALLOW_NATIVE_AGENT: '1' }, fixture({ herdr: true, bun: true })), null);
 });
+
+test('in a Herdr app terminal with bun the Agent tool is denied without the herdr binary', () => {
+  const fx = fixture({ bun: true });
+  const out = run({ HC_TERMINAL_ID: 't7', HC_TERMINAL_SOCKET: '/tmp/hc.sock' }, fx);
+  const decision = out.hookSpecificOutput;
+  assert.equal(decision.permissionDecision, 'deny');
+  assert.match(decision.permissionDecisionReason, /Herdr session \(Herdr app terminal t7\)/);
+  assert.ok(decision.permissionDecisionReason.includes(`${fx.bin}/bun ${fx.plugin}/skills/poteto-mode/scripts/herdr/dispatch.ts --next <agent-name>`));
+});
+
+test('a Herdr app terminal without its socket allows the Agent tool with a note', () => {
+  const out = run({ HC_TERMINAL_ID: 't7' }, fixture({ bun: true }));
+  assert.equal(out.hookSpecificOutput, undefined);
+  assert.match(out.systemMessage, /HC_TERMINAL_SOCKET is unset/);
+});
+
+test('a Herdr app terminal without bun allows the Agent tool with a note', () => {
+  const out = run({ HC_TERMINAL_ID: 't7', HC_TERMINAL_SOCKET: '/tmp/hc.sock' }, fixture({}));
+  assert.equal(out.hookSpecificOutput, undefined);
+  assert.match(out.systemMessage, /Herdr app terminal t7 but bun is not installed/);
+});
+
+test('PSTACK_HERDR_ALLOW_NATIVE_AGENT=1 bypasses the gate in a Herdr app terminal', () => {
+  assert.equal(
+    run({ HC_TERMINAL_ID: 't7', HC_TERMINAL_SOCKET: '/tmp/hc.sock', PSTACK_HERDR_ALLOW_NATIVE_AGENT: '1' }, fixture({ bun: true })),
+    null
+  );
+});
+
+test('a Herdr TUI pane inside a Herdr app terminal still needs the herdr binary', () => {
+  const out = run({ HERDR_ENV: '1', HC_TERMINAL_ID: 't7', HC_TERMINAL_SOCKET: '/tmp/hc.sock' }, fixture({ bun: true }));
+  assert.equal(out.hookSpecificOutput, undefined);
+  assert.match(out.systemMessage, /herdr.*not on PATH/i);
+});
